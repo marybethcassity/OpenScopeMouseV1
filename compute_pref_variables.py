@@ -321,9 +321,8 @@ def main():
         master_output_dir.mkdir(parents=True, exist_ok=True)
         
         # Create filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filter_str = f"filtered_r2-{args.r2_threshold:.2f}" if args.filtered else ("all_units" if args.all_units else "snr_filtered")
-        master_filename = f"{timestamp}_all_probes_{filter_str}_results.csv"
+        master_filename = f"all_probes_{filter_str}_results.csv"
         master_csv_path = master_output_dir / master_filename
         
         master_df.to_csv(master_csv_path, index=False)
