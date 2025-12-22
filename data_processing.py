@@ -608,7 +608,6 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                 nwb=nwb,
                 unit_idx=unit_idx,
                 dg_stim_table=dg_stim_table,
-                dg_conditions=None,  # Will be calculated inside the function
                 use_curvefit=use_curvefit
             )
             
