@@ -526,7 +526,7 @@ def calculate_rf_center(rf, xs, ys):
     Parameters:
     -----------
     rf : ndarray
-        2D receptive field array
+        2D receptive field arrpay
     xs : array
         X positions
     ys : array
@@ -536,7 +536,7 @@ def calculate_rf_center(rf, xs, ys):
     --------
     tuple : (x_center, y_center) or None if fitting fails
     """
-    from filtering import fit_gaussian_to_rf
+    from gaussian_filtering import fit_gaussian_to_rf
     
     # Fit Gaussian to RF
     popt, r_squared, _ = fit_gaussian_to_rf(rf)

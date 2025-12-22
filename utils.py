@@ -9,7 +9,7 @@ from datetime import datetime
 import pickle
 
 
-def create_output_directory(base_dir, probe, filtered=False, r2_threshold=None):
+def create_output_directory(base_dir, probe, filtered=False, r2_threshold=None, curvefit=False):
     """
     Create an output directory with flags in the name.
     
@@ -23,23 +23,26 @@ def create_output_directory(base_dir, probe, filtered=False, r2_threshold=None):
         Whether Gaussian filtering was applied
     r2_threshold : float or None
         R² threshold if filtering was applied
+    curvefit : bool
+        Whether curve fitting was used for preferred metrics
     
     Returns:
     --------
     Path : Created output directory path
     """
-    # Create timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
     # Build directory name with flags
-    dir_parts = [timestamp, probe]
+    dir_parts = [probe]
     
     if filtered and r2_threshold is not None:
         dir_parts.append(f"filtered_r2-{r2_threshold:.2f}")
     elif filtered:
         dir_parts.append("filtered")
+    
+    # Add curvefit vs argmax
+    if curvefit:
+        dir_parts.append("curvefit")
     else:
-        dir_parts.append("unfiltered")
+        dir_parts.append("argmax")
     
     dir_name = "_".join(dir_parts)
     

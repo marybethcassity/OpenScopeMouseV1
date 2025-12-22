@@ -169,7 +169,8 @@ def main():
             base_dir=args.output_dir,
             probe=probe,
             filtered=args.filtered,
-            r2_threshold=args.r2_threshold if args.filtered else None
+            r2_threshold=args.r2_threshold if args.filtered else None,
+            curvefit=args.curvefit
         )
         
         print(f"Data directory: {data_dir}")
