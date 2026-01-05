@@ -593,7 +593,7 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
     
     print(f"    Processing {total_units} units...")
     
-    # OPTIMIZATION: Calculate conditionwise statistics for ALL units at once
+
     if verbose:
         print(f"    Calculating spike statistics for all {total_units} units...")
     

@@ -221,8 +221,8 @@ def plot_avg_rf(df,
     average_rf = np.mean(filtered_rfs, axis=0)
     
     # Get RF extent from positions
-    x_min, x_max = x_positions.min(), x_positions.max()
-    y_min, y_max = y_positions.min(), y_positions.max()
+    x_min, x_max = -40, 40
+    y_min, y_max = -40, 40
     
     # Add padding
     x_padding = (x_max - x_min) * 0.1
