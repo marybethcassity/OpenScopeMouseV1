@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+from datetime import datetime
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.linear_model import LinearRegression
@@ -30,7 +31,83 @@ def parse_arguments():
         help='Path to directory containing metric csv'
     )
 
+    parser.add_argument(
+        '--filtering',
+        type=str,
+        default=None,
+        help='Filtering method to apply (e.g., "peak_prominence")'
+    )
+
     return parser.parse_args()
+
+def calculate_peak_prominence(responses_str):
+    """
+    Calculate peak prominence from response string.
+    
+    Args:
+        responses_str: String representation of response array
+        
+    Returns:
+        Peak prominence value or NaN if invalid
+    """
+    try:
+        # Parse the string representation of the array
+        responses = np.array(eval(responses_str))
+        max_resp = np.max(responses)
+        mean_resp = np.mean(responses)
+        peak_prominence = (max_resp - mean_resp) / (max_resp + 1e-6)
+        return peak_prominence
+    except:
+        return np.nan
+
+def apply_peak_prominence_calc(df, threshold=0.25):
+    """
+    Calculate peak prominence for all response types and add as columns.
+    Does not apply filtering - that will be done per variable during regression.
+    
+    Args:
+        df: DataFrame with response columns
+        threshold: Minimum peak prominence value (default 0.25)
+        
+    Returns:
+        DataFrame with prominence columns added and prominence statistics dictionary
+    """
+    prominence_stats = {
+        'ori': {'values': [], 'mean': np.nan, 'median': np.nan, 'std': np.nan},
+        'tf': {'values': [], 'mean': np.nan, 'median': np.nan, 'std': np.nan},
+        'sf': {'values': [], 'mean': np.nan, 'median': np.nan, 'std': np.nan}
+    }
+    
+    # Calculate peak prominence for each response type
+    if 'ori_responses' in df.columns:
+        df['ori_peak_prominence'] = df['ori_responses'].apply(calculate_peak_prominence)
+        valid_ori = df['ori_peak_prominence'].dropna()
+        if len(valid_ori) > 0:
+            prominence_stats['ori']['values'] = valid_ori.values
+            prominence_stats['ori']['mean'] = valid_ori.mean()
+            prominence_stats['ori']['median'] = valid_ori.median()
+            prominence_stats['ori']['std'] = valid_ori.std()
+    
+    if 'tf_responses' in df.columns:
+        df['tf_peak_prominence'] = df['tf_responses'].apply(calculate_peak_prominence)
+        valid_tf = df['tf_peak_prominence'].dropna()
+        if len(valid_tf) > 0:
+            prominence_stats['tf']['values'] = valid_tf.values
+            prominence_stats['tf']['mean'] = valid_tf.mean()
+            prominence_stats['tf']['median'] = valid_tf.median()
+            prominence_stats['tf']['std'] = valid_tf.std()
+    
+    if 'sf_responses' in df.columns:
+        df['sf_peak_prominence'] = df['sf_responses'].apply(calculate_peak_prominence)
+        valid_sf = df['sf_peak_prominence'].dropna()
+        if len(valid_sf) > 0:
+            prominence_stats['sf']['values'] = valid_sf.values
+            prominence_stats['sf']['mean'] = valid_sf.mean()
+            prominence_stats['sf']['median'] = valid_sf.median()
+            prominence_stats['sf']['std'] = valid_sf.std()
+    
+    # Don't filter here - just return df with prominence columns added
+    return df, prominence_stats
 
 def main():
     """Main execution function."""
@@ -41,20 +118,37 @@ def main():
         print(f"Error: Data directory does not exist: {data_dir}")
         sys.exit(1)
 
+    # Create output directory with timestamp and filtering argument
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filtering_str = args.filtering if args.filtering else "no_filter"
+    output_dir_name = f"regression_{timestamp}_{filtering_str}"
+    output_dir = data_dir / "regression"/ output_dir_name
+    output_dir.mkdir(exist_ok=True)
+    
+    print(f"\nResults will be saved to: {output_dir}")
+
     continuous_variables = ['osi_dg', 'dsi_dg']
     discrete_variables = ['pref_ori', 'pref_tf', 'pref_sf']
 
     results = {}
     
+    # Dictionary to store prominence statistics across all probes
+    all_prominence_stats = {
+        'ori': [],
+        'tf': [],
+        'sf': []
+    }
+    
+    # List to track skipped probes due to insufficient data
+    skipped_probes = []
+    
     # Dictionary to store data for concatenation
     all_data = {
-        'pref_tf': [], 
-        'pref_ori': [], 
-        'pref_sf': [], 
-        'osi_dg': [],
-        'dsi_dg': [],
-        'rf_x': [], 
-        'rf_y': []
+        'pref_tf': pd.DataFrame(columns=['variable', 'rf_x', 'rf_y']),
+        'pref_ori': pd.DataFrame(columns=['variable', 'rf_x', 'rf_y']),
+        'pref_sf': pd.DataFrame(columns=['variable', 'rf_x', 'rf_y']),
+        'osi_dg': pd.DataFrame(columns=['variable', 'rf_x', 'rf_y']),
+        'dsi_dg': pd.DataFrame(columns=['variable', 'rf_x', 'rf_y'])
     }
 
     for mouse_dir in data_dir.iterdir():
@@ -78,42 +172,53 @@ def main():
 
             df = pd.read_csv(metrics_csv[0])
 
+            # Apply peak prominence filtering if requested
+            if args.filtering == 'peak_prominence':
+                df, prominence_stats = apply_peak_prominence_calc(df, threshold=0.25)
+                
+                # Collect prominence values for later plotting
+                if prominence_stats['ori']['values'] is not None and len(prominence_stats['ori']['values']) > 0:
+                    all_prominence_stats['ori'].extend(prominence_stats['ori']['values'])
+                if prominence_stats['tf']['values'] is not None and len(prominence_stats['tf']['values']) > 0:
+                    all_prominence_stats['tf'].extend(prominence_stats['tf']['values'])
+                if prominence_stats['sf']['values'] is not None and len(prominence_stats['sf']['values']) > 0:
+                    all_prominence_stats['sf'].extend(prominence_stats['sf']['values'])
+            
             X = df[['rf_x_center', 'rf_y_center']].values
 
             results[probe] = {}
-            
-            # Collect data for concatenation - only collect valid (non-NaN) data
-            for variable in discrete_variables:
-                if variable in df.columns:
-                    valid_mask = df[variable].notna() & df['rf_x_center'].notna() & df['rf_y_center'].notna()
-                    all_data[variable].extend(df.loc[valid_mask, variable].values)
-                    all_data['rf_x'].extend(df.loc[valid_mask, 'rf_x_center'].values)
-                    all_data['rf_y'].extend(df.loc[valid_mask, 'rf_y_center'].values)
-            
-            for variable in continuous_variables:
-                if variable in df.columns:
-                    valid_mask = df[variable].notna() & df['rf_x_center'].notna() & df['rf_y_center'].notna()
-                    all_data[variable].extend(df.loc[valid_mask, variable].values)
-                    if variable == continuous_variables[0]:  # Only add RF centers once per probe
-                        all_data['rf_x'].extend(df.loc[valid_mask, 'rf_x_center'].values)
-                        all_data['rf_y'].extend(df.loc[valid_mask, 'rf_y_center'].values)
 
             # Process discrete variables
+            probe_has_sufficient_data = True  # Track if this probe should be skipped
+            skip_reasons = []  # Track which variables caused skipping
+            
+            # Collect data for concatenation - only collect valid (non-NaN) data
+            # Apply variable-specific prominence filtering when collecting data
             for variable in discrete_variables:
-                print(f"\nLogistic regression for discrete variable: {variable} (Probe: {probe})")
+                if variable in df.columns:
+                    valid_mask = df[variable].notna() & df['rf_x_center'].notna() & df['rf_y_center'].notna()
+                    
+                    # Apply variable-specific prominence filter if enabled
+                    if args.filtering == 'peak_prominence':
+                        prominence_col_map = {
+                            'pref_ori': 'ori_peak_prominence',
+                            'pref_tf': 'tf_peak_prominence',
+                            'pref_sf': 'sf_peak_prominence'
+                        }
+                        if variable in prominence_col_map:
+                            prominence_col = prominence_col_map[variable]
+                            if prominence_col in df.columns:
+                                valid_mask = valid_mask & (df[prominence_col] >= 0.25)
+                    
+                    temp_df = pd.DataFrame({
+                        'variable': df.loc[valid_mask, variable].values,
+                        'rf_x': df.loc[valid_mask, 'rf_x_center'].values,
+                        'rf_y': df.loc[valid_mask, 'rf_y_center'].values
+                    })
+        
+                    all_data[variable] = pd.concat([all_data[variable], temp_df], ignore_index=True)
 
-                if variable not in df.columns:
-                    print(f"  Warning: {variable} not found in dataframe")
-                    continue
-
-                # Create a mask for valid (non-NaN) values
-                valid_mask = df[variable].notna() & df['rf_x_center'].notna() & df['rf_y_center'].notna()
-                
-                if valid_mask.sum() == 0:
-                    print(f"  Warning: No valid data for {variable}")
-                    continue
-                
-                # Filter data to remove NaN values
+                # Get data for regression
                 X_valid = df.loc[valid_mask, ['rf_x_center', 'rf_y_center']].values
                 y = df.loc[valid_mask, variable].values
 
@@ -133,12 +238,43 @@ def main():
                 chance_proportional_accuracy = chance_proportional.sum()
 
                 print(f"  Valid samples: {len(y)} out of {len(df)}")
+                print(f"  Class distribution: {dict(counts)}")
+
+                # Check if any class has fewer than 2 samples (required for stratified split)
+                min_class_count = counts.min()
+                if min_class_count < 2:
+                    print(f"  Warning: Least populated class has only {min_class_count} sample(s). Need at least 2 per class.")
+                    print(f"  SKIPPING ENTIRE PROBE: {probe}")
+                    probe_has_sufficient_data = False
+                    skip_reasons.append(f"{variable}: {len(y)} samples, least populated class has {min_class_count}")
+                    break  # Skip this entire probe
+
+                # Adjust test_size for small datasets to ensure enough samples per class
+                # Rule: test_size needs at least 1 sample per class, ideally 2+
+                min_test_samples = len(unique_classes) * 2  # At least 2 samples per class in test
+                
+                if len(y) < min_test_samples + len(unique_classes):
+                    print(f"  Warning: Dataset too small ({len(y)} samples, {len(unique_classes)} classes) for reliable train/test split.")
+                    print(f"  SKIPPING ENTIRE PROBE: {probe}")
+                    probe_has_sufficient_data = False
+                    skip_reasons.append(f"{variable}: {len(y)} samples, {len(unique_classes)} classes")
+                    break  # Skip this entire probe
+                
+                # Calculate appropriate test_size
+                if len(y) < 50:
+                    # For very small datasets, use larger test fraction but ensure minimum samples
+                    test_size = max(0.3, min_test_samples / len(y))
+                else:
+                    test_size = 0.2
+                
+                # Ensure test_size doesn't exceed 0.5
+                test_size = min(test_size, 0.5)
 
                 scaler = StandardScaler()
                 X_scaled = scaler.fit_transform(X_valid)
 
                 X_train, X_test, y_train, y_test = train_test_split(
-                    X_scaled, y, test_size=0.2, random_state=42, stratify=y
+                    X_scaled, y, test_size=test_size, random_state=42, stratify=y
                 )
 
                 model = LogisticRegression(
@@ -162,23 +298,42 @@ def main():
                     'intercept': model.intercept_,
                     'classes': model.classes_
                 }
-
-            # Process continuous variables
+            
+            # If probe should be skipped, record it and skip continuous variables too
+            if not probe_has_sufficient_data:
+                mouse_name = mouse_dir.name
+                skipped_probes.append({
+                    'mouse': mouse_name,
+                    'probe': probe,
+                    'reason': '; '.join(skip_reasons)
+                })
+                print(f"\n*** PROBE {probe} SKIPPED - Insufficient data after filtering ***\n")
+                continue  # Skip to next probe
+            
             for variable in continuous_variables:
-                print(f"\nLinear regression for continuous variable: {variable} (Probe: {probe})")
-
-                if variable not in df.columns:
-                    print(f"  Warning: {variable} not found in dataframe")
-                    continue
-
-                # Create a mask for valid (non-NaN) values
-                valid_mask = df[variable].notna() & df['rf_x_center'].notna() & df['rf_y_center'].notna()
-                
-                if valid_mask.sum() == 0:
-                    print(f"  Warning: No valid data for {variable}")
-                    continue
-                
-                # Filter data to remove NaN values
+                if variable in df.columns:
+                    valid_mask = df[variable].notna() & df['rf_x_center'].notna() & df['rf_y_center'].notna()
+                    
+                    # Apply variable-specific prominence filter if enabled
+                    if args.filtering == 'peak_prominence':
+                        prominence_col_map = {
+                            'osi_dg': 'ori_peak_prominence',
+                            'dsi_dg': 'ori_peak_prominence'
+                        }
+                        if variable in prominence_col_map:
+                            prominence_col = prominence_col_map[variable]
+                            if prominence_col in df.columns:
+                                valid_mask = valid_mask & (df[prominence_col] >= 0.25)
+                    
+                    temp_df = pd.DataFrame({
+                        'variable': df.loc[valid_mask, variable].values,
+                        'rf_x': df.loc[valid_mask, 'rf_x_center'].values,
+                        'rf_y': df.loc[valid_mask, 'rf_y_center'].values
+                    })
+                    
+                    all_data[variable] = pd.concat([all_data[variable], temp_df], ignore_index=True)
+                    
+                # Get data for regression
                 X_valid = df.loc[valid_mask, ['rf_x_center', 'rf_y_center']].values
                 y = df.loc[valid_mask, variable].values
                 
@@ -226,9 +381,8 @@ def main():
         print(f"\n  {variable}:")
         
         # Prepare concatenated data
-        n_samples = len(all_data[variable])
-        X = np.column_stack([all_data['rf_x'][:n_samples], all_data['rf_y'][:n_samples]])
-        y = np.array(all_data[variable])
+        X = all_data[variable][['rf_x', 'rf_y']].values
+        y = all_data[variable]['variable'].values
         
         if variable == 'pref_sf':
             y = y * 100
@@ -243,12 +397,34 @@ def main():
         chance_accuracy_proportional = chance_proportional.sum()
         print(f"    Chance accuracy (proportional): {chance_accuracy_proportional:.4f}")
         
+        # Check if any class has fewer than 2 samples (required for stratified split)
+        min_class_count = orientation_counts.min()
+        if min_class_count < 2:
+            print(f"    Warning: Least populated class has only {min_class_count} sample(s). Need at least 2 per class. Skipping.")
+            continue
+        
+        # Check if dataset is large enough for train/test split
+        unique_classes = np.unique(y)
+        min_test_samples = len(unique_classes) * 2
+        
+        if len(y) < min_test_samples + len(unique_classes):
+            print(f"    Warning: Dataset too small ({len(y)} samples, {len(unique_classes)} classes) for reliable train/test split. Skipping.")
+            continue
+        
+        # Calculate appropriate test_size
+        if len(y) < 50:
+            test_size = max(0.3, min_test_samples / len(y))
+        else:
+            test_size = 0.2
+        
+        test_size = min(test_size, 0.5)
+        
         # Train model
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
         X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42, stratify=y
+            X_scaled, y, test_size=test_size, random_state=42, stratify=y
         )
         
         model = LogisticRegression(
@@ -280,21 +456,16 @@ def main():
         print(f"\n  {variable}:")
         
         # Prepare concatenated data
-        n_samples = len(all_data[variable])
-        X_all = np.column_stack([all_data['rf_x'][:n_samples], all_data['rf_y'][:n_samples]])
-        y_all = np.array(all_data[variable])
+        X = all_data[variable][['rf_x', 'rf_y']].values
+        y = all_data[variable]['variable'].values
         
-        # Remove NaN values
-        valid_mask = ~np.isnan(y_all) & ~np.isnan(X_all[:, 0]) & ~np.isnan(X_all[:, 1])
-        
+        valid_mask = ~np.isnan(y)
         if valid_mask.sum() == 0:
             print(f"    Warning: No valid data for {variable}")
             continue
         
-        X = X_all[valid_mask]
-        y = y_all[valid_mask]
-        
-        print(f"    Valid samples: {len(y)} out of {len(y_all)}")
+        X = X[valid_mask]
+        y = y[valid_mask]
         
         # Train model
         scaler = StandardScaler()
@@ -397,8 +568,8 @@ def main():
 
     plt.tight_layout()
     
-    # Save to the parent data directory
-    plt.savefig(os.path.join(data_dir, 'accuracy_discrete.png'), dpi=300, bbox_inches='tight')
+    # Save to the output directory
+    plt.savefig(output_dir / 'accuracy_discrete.png', dpi=300, bbox_inches='tight')
     
     plt.show()
 
@@ -473,8 +644,8 @@ def main():
 
     plt.tight_layout()
     
-    # Save to the parent data directory
-    plt.savefig(os.path.join(data_dir, 'r2_scores_continuous.png'), dpi=300, bbox_inches='tight')
+    # Save to the output directory
+    plt.savefig(output_dir / 'r2_scores_continuous.png', dpi=300, bbox_inches='tight')
     
     plt.show()
 
@@ -501,6 +672,139 @@ def main():
                 coefs = results[probe][variable]['coefficients']
                 intercept = results[probe][variable]['intercept']
                 print(f"{probe:<18} {variable:<10} {coefs[0]:>11.4f} {coefs[1]:>11.4f} {intercept:>11.4f}")
+
+    print(f"\nAll results saved to: {output_dir}")
+
+    # Save skipped probes to CSV file
+    if skipped_probes:
+        skipped_df = pd.DataFrame(skipped_probes)
+        skipped_csv_path = output_dir / 'skipped_probes.csv'
+        skipped_df.to_csv(skipped_csv_path, index=False)
+        print(f"\nSkipped probes saved to: {skipped_csv_path}")
+        print(f"Total probes skipped: {len(skipped_probes)}")
+    else:
+        print("\nNo probes were skipped.")
+
+    # Create box plots for peak prominence if filtering was applied
+    if args.filtering == 'peak_prominence':
+        print("\nCreating peak prominence statistics plots...")
+        
+        fig, axes = plt.subplots(1, 3, figsize=(15, 6))
+        
+        response_types = ['ori', 'tf', 'sf']
+        colors = ['steelblue', 'darkorange', 'forestgreen']
+        
+        for idx, (resp_type, color) in enumerate(zip(response_types, colors)):
+            ax = axes[idx]
+            
+            if len(all_prominence_stats[resp_type]) > 0:
+                data = all_prominence_stats[resp_type]
+                
+                # Create box plot
+                bp = ax.boxplot([data], widths=0.6, patch_artist=True,
+                               boxprops=dict(facecolor=color, alpha=0.7),
+                               medianprops=dict(color='red', linewidth=2),
+                               whiskerprops=dict(color=color),
+                               capprops=dict(color=color))
+                
+                # Add statistics text
+                mean_val = np.mean(data)
+                median_val = np.median(data)
+                std_val = np.std(data)
+                min_val = np.min(data)
+                max_val = np.max(data)
+                
+                stats_text = f'Mean: {mean_val:.3f}\n'
+                stats_text += f'Median: {median_val:.3f}\n'
+                stats_text += f'Std: {std_val:.3f}\n'
+                stats_text += f'Min: {min_val:.3f}\n'
+                stats_text += f'Max: {max_val:.3f}\n'
+                stats_text += f'N: {len(data)}'
+                
+                ax.text(0.98, 0.98, stats_text,
+                       transform=ax.transAxes,
+                       verticalalignment='top',
+                       horizontalalignment='right',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                       fontsize=9)
+                
+                # Add threshold line
+                ax.axhline(y=0.25, color='red', linestyle='--', linewidth=1.5, 
+                          label='Threshold (0.25)', alpha=0.7)
+                
+                ax.set_ylabel('Peak Prominence', fontsize=11, fontweight='bold')
+                ax.set_title(f'{resp_type.upper()} Responses', fontsize=12, fontweight='bold')
+                ax.set_xticks([])
+                ax.grid(axis='y', alpha=0.3)
+                ax.legend(loc='lower right', fontsize=9)
+            else:
+                ax.text(0.5, 0.5, 'No Data', 
+                       transform=ax.transAxes,
+                       horizontalalignment='center',
+                       verticalalignment='center',
+                       fontsize=14)
+                ax.set_title(f'{resp_type.upper()} Responses', fontsize=12, fontweight='bold')
+        
+        plt.suptitle('Peak Prominence Distribution (All Probes)', 
+                    fontsize=14, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        
+        # Save the plot
+        plt.savefig(output_dir / 'peak_prominence_stats.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        print("Peak prominence statistics plot saved!")
+        
+        # Also create a histogram for each response type
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
+        for idx, (resp_type, color) in enumerate(zip(response_types, colors)):
+            ax = axes[idx]
+            
+            if len(all_prominence_stats[resp_type]) > 0:
+                data = all_prominence_stats[resp_type]
+                
+                # Create histogram
+                ax.hist(data, bins=50, color=color, alpha=0.7, edgecolor='black')
+                
+                # Add threshold line
+                ax.axvline(x=0.25, color='red', linestyle='--', linewidth=2, 
+                          label='Threshold (0.25)', alpha=0.8)
+                
+                # Count cells above threshold
+                n_above = np.sum(np.array(data) >= 0.25)
+                n_total = len(data)
+                pct_above = (n_above / n_total) * 100
+                
+                ax.text(0.98, 0.98, f'{n_above}/{n_total} ({pct_above:.1f}%)\nabove threshold',
+                       transform=ax.transAxes,
+                       verticalalignment='top',
+                       horizontalalignment='right',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                       fontsize=10)
+                
+                ax.set_xlabel('Peak Prominence', fontsize=11, fontweight='bold')
+                ax.set_ylabel('Count', fontsize=11, fontweight='bold')
+                ax.set_title(f'{resp_type.upper()} Responses', fontsize=12, fontweight='bold')
+                ax.grid(axis='y', alpha=0.3)
+                ax.legend(loc='upper left', fontsize=9)
+            else:
+                ax.text(0.5, 0.5, 'No Data', 
+                       transform=ax.transAxes,
+                       horizontalalignment='center',
+                       verticalalignment='center',
+                       fontsize=14)
+                ax.set_title(f'{resp_type.upper()} Responses', fontsize=12, fontweight='bold')
+        
+        plt.suptitle('Peak Prominence Histogram (All Probes)', 
+                    fontsize=14, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        
+        # Save the plot
+        plt.savefig(output_dir / 'peak_prominence_histogram.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        print("Peak prominence histogram saved!")
 
 if __name__ == "__main__":
     main()
