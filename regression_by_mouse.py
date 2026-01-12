@@ -28,14 +28,22 @@ def parse_arguments():
         '--data_dir',
         type=str,
         required=True,
-        help='Path to directory containing metric csv'
+        help='Path to directory containing metric csv. Ex: "X:\Personnel\MaryBeth\OpenScope\001568\results\results_all-probes_filtered-r2-0.50_20260108_144341"'
     )
 
+    # Optional arguments
     parser.add_argument(
         '--filtering',
         type=str,
         default=None,
         help='Filtering method to apply (e.g., "peak_prominence")'
+    )
+
+    parser.add_argument(
+        '--threshold',
+        type=float,
+        default=0.25,
+        help='Threshold value for filtering (e.g., 0.25)'
     )
 
     return parser.parse_args()
@@ -60,14 +68,12 @@ def calculate_peak_prominence(responses_str):
     except:
         return np.nan
 
-def apply_peak_prominence_calc(df, threshold=0.25):
+def apply_peak_prominence_calc(df):
     """
     Calculate peak prominence for all response types and add as columns.
-    Does not apply filtering - that will be done per variable during regression.
     
     Args:
         df: DataFrame with response columns
-        threshold: Minimum peak prominence value (default 0.25)
         
     Returns:
         DataFrame with prominence columns added and prominence statistics dictionary
@@ -121,7 +127,13 @@ def main():
     # Create output directory with timestamp and filtering argument
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filtering_str = args.filtering if args.filtering else "no_filter"
-    output_dir_name = f"regression_{timestamp}_{filtering_str}"
+    threshold = args.threshold if args.filtering else "N/A"
+
+    if args.filtering:
+        output_dir_name = f"regression_{timestamp}_{filtering_str}_{threshold}"
+    else:
+        output_dir_name = f"regression_{timestamp}_no_filter"  
+    
     output_dir = data_dir / "regression"/ output_dir_name
     output_dir.mkdir(exist_ok=True)
     
@@ -174,7 +186,7 @@ def main():
 
             # Apply peak prominence filtering if requested
             if args.filtering == 'peak_prominence':
-                df, prominence_stats = apply_peak_prominence_calc(df, threshold=0.25)
+                df, prominence_stats = apply_peak_prominence_calc(df)
                 
                 # Collect prominence values for later plotting
                 if prominence_stats['ori']['values'] is not None and len(prominence_stats['ori']['values']) > 0:
@@ -208,7 +220,7 @@ def main():
                         if variable in prominence_col_map:
                             prominence_col = prominence_col_map[variable]
                             if prominence_col in df.columns:
-                                valid_mask = valid_mask & (df[prominence_col] >= 0.25)
+                                valid_mask = valid_mask & (df[prominence_col] >= threshold)
                     
                     temp_df = pd.DataFrame({
                         'variable': df.loc[valid_mask, variable].values,
