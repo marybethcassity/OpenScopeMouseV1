@@ -127,10 +127,11 @@ def main():
     # Create output directory with timestamp and filtering argument
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filtering_str = args.filtering if args.filtering else "no_filter"
-    threshold = args.threshold if args.filtering else "N/A"
+    #threshold = args.threshold if args.filtering else "N/A"
 
     if args.filtering:
-        output_dir_name = f"regression_{timestamp}_{filtering_str}_{threshold}"
+        #output_dir_name = f"regression_{timestamp}_{filtering_str}_{threshold}"
+        output_dir_name = f"regression_{timestamp}_{filtering_str}"
     else:
         output_dir_name = f"regression_{timestamp}_no_filter"  
 
