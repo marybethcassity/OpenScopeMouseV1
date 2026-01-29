@@ -133,9 +133,9 @@ def main():
         output_dir_name = f"regression_{timestamp}_{filtering_str}_{threshold}"
     else:
         output_dir_name = f"regression_{timestamp}_no_filter"  
-    
-    output_dir = data_dir / "regression"/ output_dir_name
-    output_dir.mkdir(exist_ok=True)
+
+    output_dir = data_dir / "regression" / output_dir_name
+    output_dir.mkdir(exist_ok=True, parents=True)
     
     print(f"\nResults will be saved to: {output_dir}")
 
