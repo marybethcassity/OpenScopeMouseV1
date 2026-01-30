@@ -37,10 +37,12 @@ def create_results_directory(args):
     # Add filtering mode
     if args.filtered:
         dir_parts.append(f"filtered-r2-{args.r2_threshold:.2f}")
-    elif args.all_units:
-        dir_parts.append("all-units")
     else:
-        dir_parts.append("snr-filtered")
+        dir_parts.append("all-units")
+    # elif args.all_units:
+    #     dir_parts.append("all-units")
+    # else:
+    #     dir_parts.append("snr-filtered")
     
     # Add curvefit flag if used
     if args.curvefit:

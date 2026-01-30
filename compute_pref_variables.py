@@ -71,11 +71,11 @@ Examples:
         help='Apply Gaussian fitting filter to receptive fields'
     )
 
-    filter_group.add_argument(
-        '--all_units',
-        action='store_true',
-        help='Include all units without filtering'
-    )
+    # filter_group.add_argument(
+    #     '--all_units',
+    #     action='store_true',
+    #     help='Include all units without filtering'
+    # )
     
     parser.add_argument(
         '--r2_threshold',
@@ -414,7 +414,7 @@ def main():
                 probe_output_dir.mkdir(parents=True, exist_ok=True)
                 
                 print(f"    Probe: {probe}")
-                print(f"    Filtering: {'Gaussian fit (R² >= ' + str(args.r2_threshold) + ')' if args.filtered else 'SNR only' if not args.all_units else 'All units'}")
+                print(f"    Filtering: {'Gaussian fit (R² >= ' + str(args.r2_threshold) + ')' if args.filtered else 'All units'}")
                 print(f"    Output directory: {probe_output_dir}")
                 print()
                 
