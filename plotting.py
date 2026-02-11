@@ -661,7 +661,7 @@ def plot_preferred_orientation_by_rf_from_csv(combined_df, filtered_rfs, save_pa
 
 
 def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, save_path=None,
-                                     probe_name=None, mouse_name=None, background=True):
+                                     probe_name=None, mouse_name=None, background=True, nested=False):
     """
     Plot RF centers colored by preferred temporal frequency with average RF background.
     Uses CSV data with RF centers already computed.
@@ -688,7 +688,13 @@ def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, save_path=None,
     
     x_positions = df['rf_x_center'].values
     y_positions = df['rf_y_center'].values
-    preferred_tfs = df['pref_tf'].values
+    
+    if nested:
+        preferred_tfs = df['pref_tf_nested'].values
+        title = f'RF Centers Colored by Nested Preferred Temporal Frequency\n({len(df)} cells)'
+    else:
+        preferred_tfs = df['pref_tf'].values
+        title = f'RF Centers Colored by Preferred Temporal Frequency\n({len(df)} cells)'
     
     unique_tfs = np.unique(preferred_tfs)
     n_tfs = len(unique_tfs)
@@ -731,7 +737,7 @@ def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, save_path=None,
     ax.set_ylabel('RF Center Y Position (degrees)', fontsize=14)
     
     # Create title
-    title = f'RF Centers Colored by Preferred Temporal Frequency\n({len(df)} cells)'
+   
     if mouse_name and probe_name:
         title = f'{mouse_name} - {probe_name}\n' + title
     elif probe_name:
@@ -754,7 +760,7 @@ def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, save_path=None,
 
 
 def plot_preferred_sf_by_rf_from_csv(combined_df, filtered_rfs, save_path=None,
-                                     probe_name=None, mouse_name=None, background=True):
+                                     probe_name=None, mouse_name=None, background=True, nested=False):
     """
     Plot RF centers colored by preferred spatial frequency with average RF background.
     Uses CSV data with RF centers already computed.
@@ -781,7 +787,14 @@ def plot_preferred_sf_by_rf_from_csv(combined_df, filtered_rfs, save_path=None,
     
     x_positions = df['rf_x_center'].values
     y_positions = df['rf_y_center'].values
-    preferred_sfs = df['pref_sf'].values
+
+    if nested:
+        preferred_sfs = df['pref_sf_nested'].values
+        title = f'RF Centers Colored by Nested Preferred Spatial Frequency\n({len(df)} cells)'
+    else:
+        preferred_sfs = df['pref_sf'].values
+        title = f'RF Centers Colored by Preferred Spatial Frequency\n({len(df)} cells)'
+ 
     
     unique_sfs = np.unique(preferred_sfs)
     n_sfs = len(unique_sfs)
