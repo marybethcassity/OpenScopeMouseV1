@@ -751,9 +751,14 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
             
             pref_tf_nested = tf_vals[np.argmax(tf_responses)]
             
+            # TO DO: ALSO DO FOR PREF TF NESTED
             # Calculate OSI and DSI
             osi_val, dsi_val = calculate_osi_dsi(
                 unit_idx, pref_tf, conditionwise_stats, stimulus_conditions, ori_vals
+            )
+
+            osi_val_nested, dsi_val_nested = calculate_osi_dsi(
+                unit_idx, pref_tf_nested, conditionwise_stats, stimulus_conditions, ori_vals
             )
             
             peak_dff_dg = float(max(ori_responses)) if ori_responses else 0.0
@@ -789,7 +794,9 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                 'pref_sf_nested': float(pref_sf_nested),
                 'sf_responses': sf_responses,
                 'osi_dg': float(osi_val),
+                'osi_dg_nested': float(osi_val_nested),
                 'dsi_dg': float(dsi_val),
+                'dsi_dg_nested': float(dsi_val_nested),
                 'peak_dff_dg': peak_dff_dg,
                 'rf_x_center': x_pos if x_pos is not None else np.nan,
                 'rf_y_center': y_pos if y_pos is not None else np.nan,

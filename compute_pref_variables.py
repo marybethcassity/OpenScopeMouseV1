@@ -501,6 +501,17 @@ def main():
                 for probe_df in mouse_results:
                     all_mouse_results.append(probe_df)
                 print()
+
+                # Generate master plots across all mice and all probes
+                if not args.no_plots:
+                    print("Generating master plots for mouse...")
+                    empty_units_data = {}
+                    combined_mouse_results = pd.concat(mouse_results, ignore_index=True)
+                    plot_metric_distributions(combined_mouse_results, empty_units_data, mouse_output_dir, probe_name="all_probes")
+                    plot_summary_figures(combined_mouse_results, empty_units_data, mouse_output_dir, probe_name="all_probes")
+                    print(f"✓ Master plots saved to {mouse_output_dir}")
+                    print()
+
             else:
                 print(f"  Warning: No results generated for {mouse_name}")
                 print()
