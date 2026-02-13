@@ -648,8 +648,24 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                 ori_responses.append(mean_response)
             
             pref_ori = ori_vals[np.argmax(ori_responses)]
+
+            # Step 2: Calculate preferred spatial frequency
+            sf_responses = []
+            for sf in sf_vals:
+                ori_sf_conditions = stimulus_conditions[
+                    (stimulus_conditions['spatial_frequency'] == sf)
+                ].index.values
+                
+                try:
+                    mean_response = unit_stats.loc[ori_sf_conditions]['spike_mean'].mean()
+                    mean_response = float(mean_response)
+                except (KeyError, ValueError, TypeError):
+                    mean_response = 0.0
+                sf_responses.append(mean_response)
             
-            # Step 2: Calculate preferred temporal frequency (at preferred orientation)
+            pref_sf = sf_vals[np.argmax(sf_responses)]
+            
+            # Step 3: Calculate preferred temporal frequency (at preferred orientation) for nested preferred spatial frequency
             tf_responses = []
             for tf in tf_vals:
                 ori_tf_conditions = stimulus_conditions[
@@ -664,13 +680,14 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                     mean_response = 0.0
                 tf_responses.append(mean_response)
             
-            pref_tf = tf_vals[np.argmax(tf_responses)]
-            
-            # Step 3: Calculate preferred spatial frequency (at preferred orientation)
+            pref_tf_temp = tf_vals[np.argmax(tf_responses)]
+
+            # Step 4: Calculate preferred spatial frequency nested (at preferred orientation & preferred TF)
             sf_responses = []
             for sf in sf_vals:
                 ori_sf_conditions = stimulus_conditions[
                     (stimulus_conditions['orientation'] == pref_ori) &
+                    (stimulus_conditions['temporal_frequency'] == pref_tf_temp) &
                     (stimulus_conditions['spatial_frequency'] == sf)
                 ].index.values
                 
@@ -681,11 +698,67 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                     mean_response = 0.0
                 sf_responses.append(mean_response)
             
-            pref_sf = sf_vals[np.argmax(sf_responses)]
+            pref_sf_nested = sf_vals[np.argmax(sf_responses)]
+                                     
+            # Step 5: Calculate preferred temporal frequency 
+            tf_responses = []
+            for tf in tf_vals:
+                ori_tf_conditions = stimulus_conditions[
+                    (stimulus_conditions['temporal_frequency'] == tf)
+                ].index.values
+                
+                try:
+                    mean_response = unit_stats.loc[ori_tf_conditions]['spike_mean'].mean()
+                    mean_response = float(mean_response)
+                except (KeyError, ValueError, TypeError):
+                    mean_response = 0.0
+                tf_responses.append(mean_response)
             
+            pref_tf = tf_vals[np.argmax(tf_responses)]
+
+            # Step 6: Calculate preferred spatial frequency (at preferred orientation) for nested preferred temporal frequency
+            sf_responses = []
+            for sf in sf_vals:
+                ori_tf_conditions = stimulus_conditions[
+                    (stimulus_conditions['orientation'] == pref_ori) & 
+                    (stimulus_conditions['spatial_frequency'] == sf)
+                ].index.values
+                
+                try:
+                    mean_response = unit_stats.loc[ori_sf_conditions]['spike_mean'].mean()
+                    mean_response = float(mean_response)
+                except (KeyError, ValueError, TypeError):
+                    mean_response = 0.0
+                sf_responses.append(mean_response)
+            
+            pref_sf_temp = sf_vals[np.argmax(sf_responses)]
+                                     
+            # Step 7: Calculate preferred temporal frequency nested (at preferred orientation & preferred SF)
+            tf_responses = []
+            for tf in tf_vals:
+                ori_tf_conditions = stimulus_conditions[
+                    (stimulus_conditions['orientation'] == pref_ori) &
+                    (stimulus_conditions['temporal_frequency'] == pref_sf_temp) &
+                    (stimulus_conditions['temporal_frequency'] == tf)
+                ].index.values
+                
+                try:
+                    mean_response = unit_stats.loc[ori_tf_conditions]['spike_mean'].mean()
+                    mean_response = float(mean_response)
+                except (KeyError, ValueError, TypeError):
+                    mean_response = 0.0
+                tf_responses.append(mean_response)
+            
+            pref_tf_nested = tf_vals[np.argmax(tf_responses)]
+            
+            # TO DO: ALSO DO FOR PREF TF NESTED
             # Calculate OSI and DSI
             osi_val, dsi_val = calculate_osi_dsi(
                 unit_idx, pref_tf, conditionwise_stats, stimulus_conditions, ori_vals
+            )
+
+            osi_val_nested, dsi_val_nested = calculate_osi_dsi(
+                unit_idx, pref_tf_nested, conditionwise_stats, stimulus_conditions, ori_vals
             )
             
             peak_dff_dg = float(max(ori_responses)) if ori_responses else 0.0
@@ -715,11 +788,15 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                 'pref_ori': float(pref_ori),
                 'ori_responses': ori_responses,
                 'pref_tf': float(pref_tf),
+                'pref_tf_nested': float(pref_tf_nested),
                 'tf_responses': tf_responses,
                 'pref_sf': float(pref_sf),
+                'pref_sf_nested': float(pref_sf_nested),
                 'sf_responses': sf_responses,
                 'osi_dg': float(osi_val),
+                'osi_dg_nested': float(osi_val_nested),
                 'dsi_dg': float(dsi_val),
+                'dsi_dg_nested': float(dsi_val_nested),
                 'peak_dff_dg': peak_dff_dg,
                 'rf_x_center': x_pos if x_pos is not None else np.nan,
                 'rf_y_center': y_pos if y_pos is not None else np.nan,
