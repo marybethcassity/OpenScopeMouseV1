@@ -137,6 +137,7 @@ Examples:
 
 import ast
 
+# TO DO: double check this-- see other TO DO below.
 def combine_existing_results(output_dir, args):
     """
     Combine existing CSV results from a results directory.
@@ -170,7 +171,6 @@ def combine_existing_results(output_dir, args):
             if not probe_dir.is_dir():
                 continue
             
-            # Look for CSV files with metrics
             csv_files = list(probe_dir.glob("*_metrics.csv"))
             for csv_file in csv_files:
                 all_csvs.append(csv_file)
@@ -197,7 +197,6 @@ def combine_existing_results(output_dir, args):
                         if pd.isna(rf_str):
                             return None
                         if isinstance(rf_str, str):
-                            # Try ast.literal_eval first
                             return np.array(ast.literal_eval(rf_str))
                         else:
                             return rf_str
@@ -225,8 +224,7 @@ def combine_existing_results(output_dir, args):
     master_df = pd.concat(all_dfs, ignore_index=True)
     
     # Save master CSV
-    master_filename = "all_mice_all_probes_results.csv"
-    master_csv_path = output_dir / master_filename
+    master_csv_path = output_dir / "all_mice_all_probes_results.csv"
     master_df.to_csv(master_csv_path, index=False)
     
     print(f"Master CSV saved: {master_csv_path}")
@@ -253,20 +251,16 @@ def combine_existing_results(output_dir, args):
     for probe in sorted(master_df['probe'].unique()):
         print(f"\nProcessing {probe}...")
         
-        # Filter data for this probe
         probe_df = master_df[master_df['probe'] == probe].copy()
         
-        # Create probe directory
         probe_dir = output_dir / probe
         probe_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save probe-specific CSV
         probe_csv_path = probe_dir / f"{probe}_all_mice_results.csv"
         probe_df.to_csv(probe_csv_path, index=False)
         print(f"  ✓ Saved CSV: {probe_csv_path}")
         print(f"    Units: {len(probe_df)}, Mice: {probe_df['mouse_name'].nunique()}")
         
-        # Generate plots
         if not args.no_plots:
             print(f"  Generating plots for {probe} (all mice)...")
             empty_units_data = {}
@@ -276,35 +270,27 @@ def combine_existing_results(output_dir, args):
             
             # Summary figures
             plot_summary_figures(probe_df, empty_units_data, probe_dir, probe_name=f"{probe}_all_mice")
-            
-            # Normalized bar plots
-            plot_preferred_orientation_bar(
-                probe_df, 
+
+            # Normalized bar plots (non-nested and nested variants)
+            shared_normalized_kwargs = dict(
                 peak_dff_min=1.0,
-                save_path=probe_dir / f'preferred_orientation_{probe}_all_mice_normalized.png',
+                output_dir=probe_dir,
                 probe_name=probe,
                 mouse_name=f"All Mice (n={probe_df['mouse_name'].nunique()})",
                 normalize=True
             )
-            
-            plot_preferred_tf_bar(
-                probe_df,
-                peak_dff_min=1.0,
-                save_path=probe_dir / f'preferred_tf_{probe}_all_mice_normalized.png',
-                probe_name=probe,
-                mouse_name=f"All Mice (n={probe_df['mouse_name'].nunique()})",
-                normalize=True
-            )
-            
-            plot_preferred_sf_bar(
-                probe_df,
-                peak_dff_min=1.0,
-                save_path=probe_dir / f'preferred_sf_{probe}_all_mice_normalized.png',
-                probe_name=probe,
-                mouse_name=f"All Mice (n={probe_df['mouse_name'].nunique()})",
-                normalize=True
-            )
-            
+
+            plot_preferred_orientation_bar(probe_df, **shared_normalized_kwargs)
+
+            bar_configs = [
+                (plot_preferred_tf_bar, [{"nested": False}, {"nested": True}]),
+                (plot_preferred_sf_bar, [{"nested": False}, {"nested": True}]),
+            ]
+
+            for plot_fn, variants in bar_configs:
+                for variant_kwargs in variants:
+                    plot_fn(probe_df, **shared_normalized_kwargs, **variant_kwargs)
+
             print(f"  ✓ Plots saved to {probe_dir}")
     
     print()
@@ -582,47 +568,43 @@ def main():
                 print(f"  Generating plots for {probe} (all mice)...")
                 empty_units_data = {}
                 
+                # TO DO: this doesn't make a ton of sense how I did it-- we don't really need the non normalized 
+                # version of the bar plots so I should really only be making them once while calling plot_metrics_distributions and plot_summary_figures, but I want to get the normalized ones in there for now so I'm just calling them separately for now. I can clean this up later.
+                # instead of twice by calling the bar plots again and passing in normalize = True
+
                 # Distribution plots
                 plot_metric_distributions(probe_df, empty_units_data, probe_dir, probe_name=f"{probe}_all_mice")
                 
-                # Summary figures (RF position plots)
+                # Summary figures
                 plot_summary_figures(probe_df, empty_units_data, probe_dir, probe_name=f"{probe}_all_mice")
                 
-                # Additional normalized plots
-                plot_preferred_orientation_bar(
-                    probe_df, 
+                # Normalized bar plots (non-nested and nested variants)
+                shared_normalized_kwargs = dict(
                     peak_dff_min=1.0,
-                    save_path=probe_dir / f'preferred_orientation_{probe}_all_mice_normalized.png',
+                    output_dir=probe_dir,
                     probe_name=probe,
                     mouse_name=f"All Mice (n={probe_df['mouse_name'].nunique()})",
                     normalize=True
                 )
-                
-                plot_preferred_tf_bar(
-                    probe_df,
-                    peak_dff_min=1.0,
-                    save_path=probe_dir / f'preferred_tf_{probe}_all_mice_normalized.png',
-                    probe_name=probe,
-                    mouse_name=f"All Mice (n={probe_df['mouse_name'].nunique()})",
-                    normalize=True
-                )
-                
-                plot_preferred_sf_bar(
-                    probe_df,
-                    peak_dff_min=1.0,
-                    save_path=probe_dir / f'preferred_sf_{probe}_all_mice_normalized.png',
-                    probe_name=probe,
-                    mouse_name=f"All Mice (n={probe_df['mouse_name'].nunique()})",
-                    normalize=True
-                )
+
+                plot_preferred_orientation_bar(probe_df, **shared_normalized_kwargs)
+
+                bar_configs = [
+                    (plot_preferred_tf_bar, [{"nested": False}, {"nested": True}]),
+                    (plot_preferred_sf_bar, [{"nested": False}, {"nested": True}]),
+                ]
+
+                for plot_fn, variants in bar_configs:
+                    for variant_kwargs in variants:
+                        plot_fn(probe_df, **shared_normalized_kwargs, **variant_kwargs)
                 
                 print(f"  ✓ Plots saved to {probe_dir}")
+            
+            print()
         
-        print()
-    
-    print("=" * 80)
-    print(f"Analysis complete! Results saved to: {main_output_dir}")
-    print("=" * 80)
+        print("=" * 80)
+        print(f"Analysis complete! Results saved to: {main_output_dir}")
+        print("=" * 80)
 
 
 if __name__ == "__main__":

@@ -738,7 +738,7 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
             for tf in tf_vals:
                 ori_tf_conditions = stimulus_conditions[
                     (stimulus_conditions['orientation'] == pref_ori) &
-                    (stimulus_conditions['temporal_frequency'] == pref_sf_temp) &
+                    (stimulus_conditions['spatial_frequency'] == pref_sf_temp) &
                     (stimulus_conditions['temporal_frequency'] == tf)
                 ].index.values
                 
