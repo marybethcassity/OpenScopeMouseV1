@@ -7,9 +7,10 @@ import numpy as np
 import pandas as pd
 from pynwb import NWBHDF5IO
 import scipy.stats
+from scipy.optimize import curve_fit
 import warnings
 
-from gaussian_filtering import fit_gaussian_to_rf
+from gaussian_filtering import fit_gaussian_to_rf, get_rf_size_degrees
 
 
 def deg2rad(arr):
@@ -129,6 +130,25 @@ def calculate_osi_dsi(unit_id, pref_tf, conditionwise_stats, stimulus_conditions
     orivals_rad = deg2rad(unique_oris).astype('complex128')
     
     # Calculate OSI and DSI
+    return osi(orivals_rad, tuning), dsi(orivals_rad, tuning)
+
+def calculate_osi_dsi_all_tf(unit_id, conditionwise_stats, stimulus_conditions):
+    """
+    Calculate OSI and DSI averaged across all temporal frequencies.
+    Used when preferred TF is a continuous float (e.g. from Gaussian fit)
+    and cannot be matched to a discrete condition.
+    """
+    # Get all condition indices
+    all_condition_inds = stimulus_conditions.index.values
+    
+    df = conditionwise_stats.loc[unit_id].loc[all_condition_inds]
+    df = df.assign(ori=stimulus_conditions.loc[df.index.values]['orientation'])
+    
+    # Average across all TFs and repetitions for each orientation
+    tuning = df.groupby('ori')['spike_mean'].mean().sort_index().values
+    unique_oris = np.sort(df['ori'].unique())
+    orivals_rad = deg2rad(unique_oris).astype('complex128')
+    
     return osi(orivals_rad, tuning), dsi(orivals_rad, tuning)
 
 
@@ -554,6 +574,155 @@ def calculate_rf_center(rf, xs, ys):
     return float(x_pos), float(y_pos), float(r_squared)
 
 
+def gaussian_2d_sftf(coords, amplitude, log_sf0, log_tf0, sigma_sf, sigma_tf, offset):
+    """
+    2D Gaussian in log2(SF) x log2(TF) space (no rotation term).
+    Axis-aligned, matching the separable assumption for tuning curves.
+
+    Parameters
+    ----------
+    coords : tuple of (log_sf_grid, log_tf_grid), each flattened
+    amplitude : peak amplitude above baseline
+    log_sf0 : preferred SF in log2 units
+    log_tf0 : preferred TF in log2 units
+    sigma_sf : tuning width in log2 SF
+    sigma_tf : tuning width in log2 TF
+    offset : baseline firing rate
+    """
+    log_sf, log_tf = coords
+    g = offset + amplitude * np.exp(
+        -(
+            (log_sf - log_sf0) ** 2 / (2 * sigma_sf ** 2) +
+            (log_tf - log_tf0) ** 2 / (2 * sigma_tf ** 2)
+        )
+    )
+    return g.ravel()
+
+
+def fit_sftf_gaussian(sf_vals, tf_vals, response_matrix):
+    """
+    Fit a 2D Gaussian to an SF x TF response matrix in log2 frequency space.
+
+    Parameters
+    ----------
+    sf_vals : array-like of shape (n_sf,)
+        Spatial frequency values tested (linear units, e.g. cycles/deg)
+    tf_vals : array-like of shape (n_tf,)
+        Temporal frequency values tested (linear units, e.g. Hz)
+    response_matrix : array-like of shape (n_sf, n_tf)
+        Mean spike rates; rows index SF, columns index TF
+
+    Returns
+    -------
+    pref_sf : float or None
+        Preferred spatial frequency in linear units
+    pref_tf : float or None
+        Preferred temporal frequency in linear units
+    r_squared : float or None
+        Goodness of fit (R²)
+    popt : array or None
+        Raw fitted parameters [amplitude, log_sf0, log_tf0, sigma_sf, sigma_tf, offset]
+    """
+    sf_vals = np.array(sf_vals, dtype=float)
+    tf_vals = np.array(tf_vals, dtype=float)
+    response_matrix = np.array(response_matrix, dtype=float)
+
+    # Build log2 grids
+    log_sf = np.log2(sf_vals)
+    log_tf = np.log2(tf_vals)
+    log_sf_grid, log_tf_grid = np.meshgrid(log_sf, log_tf, indexing='ij')  # shape (n_sf, n_tf)
+    z = response_matrix.ravel()
+
+    # Initial guesses from argmax
+    flat_idx = np.argmax(response_matrix)
+    sf_idx, tf_idx = np.unravel_index(flat_idx, response_matrix.shape)
+
+    amplitude_guess = response_matrix.max() - response_matrix.min()
+    log_sf0_guess = log_sf[sf_idx]
+    log_tf0_guess = log_tf[tf_idx]
+    sigma_sf_guess = (log_sf[-1] - log_sf[0]) / 4.0 if len(log_sf) > 1 else 1.0
+    sigma_tf_guess = (log_tf[-1] - log_tf[0]) / 4.0 if len(log_tf) > 1 else 1.0
+    offset_guess = response_matrix.min()
+
+    initial_guess = (amplitude_guess, log_sf0_guess, log_tf0_guess, sigma_sf_guess, sigma_tf_guess, offset_guess)
+
+    bounds = (
+        [0,          log_sf[0],  log_tf[0],  0.1, 0.1, -np.inf],
+        [np.inf,     log_sf[-1], log_tf[-1], 10,  10,   np.inf]
+    )
+
+    coords = (log_sf_grid.ravel(), log_tf_grid.ravel())
+
+    def _r_squared(z_data, z_fit):
+        ss_res = np.sum((z_data - z_fit) ** 2)
+        ss_tot = np.sum((z_data - np.mean(z_data)) ** 2)
+        return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0.0
+
+    try:
+        popt, _ = curve_fit(
+            gaussian_2d_sftf,
+            coords,
+            z,
+            p0=initial_guess,
+            bounds=bounds,
+            maxfev=10000
+        )
+        z_fit = gaussian_2d_sftf(coords, *popt)
+        r_squared = _r_squared(z, z_fit)
+
+        if r_squared < -0.5:
+            print(f"Warning: SF/TF Gaussian fit R² = {r_squared:.3f}, rejecting")
+            return None, None, None, None
+
+        pref_sf = 2 ** popt[1]  # convert log2 back to linear
+        pref_tf = 2 ** popt[2]
+
+        return pref_sf, pref_tf, r_squared, popt
+
+    except RuntimeError:
+        # Bounded fit failed — retry without bounds
+        try:
+            popt, _ = curve_fit(
+                gaussian_2d_sftf,
+                coords,
+                z,
+                p0=initial_guess,
+                maxfev=10000
+            )
+            z_fit = gaussian_2d_sftf(coords, *popt)
+            r_squared = _r_squared(z, z_fit)
+            pref_sf = 2 ** popt[1]
+            pref_tf = 2 ** popt[2]
+            return pref_sf, pref_tf, r_squared, popt
+
+        except Exception as e:
+            print(f"SF/TF Gaussian fit failed (unbounded): {e}")
+            return None, None, None, None
+
+    except Exception as e:
+        print(f"SF/TF Gaussian fit failed: {e}")
+        return None, None, None, None
+
+def bin_to_nearest(value, presented_values):
+    """
+    Bin a continuous fitted value to the nearest presented stimulus value.
+    
+    Parameters
+    ----------
+    value : float or None/NaN
+        Fitted preferred value (e.g. pref_sf_gaussian)
+    presented_values : array-like
+        The discrete stimulus values that were actually presented
+    
+    Returns
+    -------
+    float : nearest presented stimulus value, or NaN if input is NaN
+    """
+    if value is None or np.isnan(value):
+        return np.nan
+    presented_values = np.array(presented_values)
+    return presented_values[np.argmin(np.abs(np.log2(presented_values) - np.log2(value)))]
+
 def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=False, verbose=False):
     """
     Calculate all metrics for all units.
@@ -719,7 +888,7 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
             # Step 6: Calculate preferred spatial frequency (at preferred orientation) for nested preferred temporal frequency
             sf_responses = []
             for sf in sf_vals:
-                ori_tf_conditions = stimulus_conditions[
+                ori_sf_conditions = stimulus_conditions[
                     (stimulus_conditions['orientation'] == pref_ori) & 
                     (stimulus_conditions['spatial_frequency'] == sf)
                 ].index.values
@@ -750,8 +919,42 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                 tf_responses.append(mean_response)
             
             pref_tf_nested = tf_vals[np.argmax(tf_responses)]
+
+
+            # Step 8: Fit Gaussian to SF x TF responses at preferred orientation to get preferred SF and TF
+            pref_sf_gaussian = None
+            pref_tf_gaussian = None
+            r_squared_gaussian = None
+
+            try:
+                sftf_matrix = np.full((len(sf_vals), len(tf_vals)), np.nan)
+                for i, sf in enumerate(sf_vals):
+                    for j, tf in enumerate(tf_vals):
+                        conditions = stimulus_conditions[
+                            (stimulus_conditions['orientation'] == pref_ori) &
+                            (stimulus_conditions['spatial_frequency'] == sf) &
+                            (stimulus_conditions['temporal_frequency'] == tf)
+                        ].index.values
+                        
+                        try:
+                            mean_response = unit_stats.loc[conditions]['spike_mean'].mean()
+                            mean_response = float(mean_response)
+                        except (KeyError, ValueError, TypeError):
+                            mean_response = 0.0
+                        sftf_matrix[i, j] = mean_response
+
+                sftf_matrix = np.nan_to_num(sftf_matrix, nan=0.0)
+                pref_sf_gaussian, pref_tf_gaussian, r_squared_gaussian, popt = fit_sftf_gaussian(sf_vals, tf_vals, sftf_matrix)
+
+                pref_sf_gaussian_binned = bin_to_nearest(pref_sf_gaussian, sf_vals)
+                pref_tf_gaussian_binned = bin_to_nearest(pref_tf_gaussian, tf_vals)
+
+            except Exception as e:
+                if verbose:
+                    print(f"      Warning: Gaussian fitting failed for unit {unit_idx}: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            # TO DO: ALSO DO FOR PREF TF NESTED
             # Calculate OSI and DSI
             osi_val, dsi_val = calculate_osi_dsi(
                 unit_idx, pref_tf, conditionwise_stats, stimulus_conditions, ori_vals
@@ -760,6 +963,13 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
             osi_val_nested, dsi_val_nested = calculate_osi_dsi(
                 unit_idx, pref_tf_nested, conditionwise_stats, stimulus_conditions, ori_vals
             )
+
+            if pref_tf_gaussian is not None:
+                osi_val_gaussian, dsi_val_gaussian = calculate_osi_dsi_all_tf(
+                    unit_idx, conditionwise_stats, stimulus_conditions
+                )
+            else:
+                osi_val_gaussian, dsi_val_gaussian = np.nan, np.nan
             
             peak_dff_dg = float(max(ori_responses)) if ori_responses else 0.0
             
@@ -772,9 +982,22 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                 y_idx = popt[2]
                 x_pos = np.interp(x_idx, np.arange(len(xs)), xs)
                 y_pos = np.interp(y_idx, np.arange(len(ys)), ys)
+
+                size_metrics = get_rf_size_degrees(popt, rf.shape)
+                rf_fwhm = size_metrics['fwhm_degrees']
+                rf_size_deg = size_metrics['size_degrees']
+                rf_sigma_x_deg = size_metrics['sigma_x_degrees']
+                rf_sigma_y_deg = size_metrics['sigma_y_degrees']
+                
             else:
                 x_pos = None
                 y_pos = None
+
+                rf_fwh = None
+                rf_size_deg = None
+                rf_sigma_x_deg = None
+                rf_sigma_y_deg = None
+
             
             # Get SNR
             snr = float(units['snr'][unit_idx])
@@ -789,19 +1012,30 @@ def calculate_all_metrics(nwb_data, units_data, mouse_name, probe, use_curvefit=
                 'ori_responses': ori_responses,
                 'pref_tf': float(pref_tf),
                 'pref_tf_nested': float(pref_tf_nested),
+                'pref_tf_gaussian': float(pref_tf_gaussian) if pref_tf_gaussian is not None else np.nan,
+                'pref_tf_gaussian_snapped': pref_tf_gaussian_binned,
                 'tf_responses': tf_responses,
                 'pref_sf': float(pref_sf),
                 'pref_sf_nested': float(pref_sf_nested),
+                'pref_sf_gaussian': float(pref_sf_gaussian) if pref_sf_gaussian is not None else np.nan,
+                'pref_sf_gaussian_snapped': pref_sf_gaussian_binned,
                 'sf_responses': sf_responses,
                 'osi_dg': float(osi_val),
                 'osi_dg_nested': float(osi_val_nested),
+                'osi_dg_gaussian': float(osi_val_gaussian) if osi_val_gaussian is not None else np.nan,
                 'dsi_dg': float(dsi_val),
                 'dsi_dg_nested': float(dsi_val_nested),
+                'dsi_dg_gaussian': float(dsi_val_gaussian) if dsi_val_gaussian is not None else np.nan,
                 'peak_dff_dg': peak_dff_dg,
                 'rf_x_center': x_pos if x_pos is not None else np.nan,
                 'rf_y_center': y_pos if y_pos is not None else np.nan,
                 'rf_r_squared': r_squared if r_squared is not None else np.nan,
-                'snr': snr
+                'r_squared_gaussian': r_squared_gaussian if r_squared_gaussian is not None else np.nan,
+                'snr': snr,
+                'rf_fwhm_deg': rf_fwhm if rf_fwhm is not None else np.nan,
+                'rf_size_deg': rf_size_deg if rf_size_deg is not None else np.nan,
+                'rf_sigma_x_deg': rf_sigma_x_deg if rf_sigma_x_deg is not None else np.nan,
+                'rf_sigma_y_deg': rf_sigma_y_deg if rf_sigma_y_deg is not None else np.nan
             }
             
             # Add R² from filtering if available

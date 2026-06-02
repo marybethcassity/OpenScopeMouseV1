@@ -1,6 +1,28 @@
 import numpy as np
 from scipy.optimize import curve_fit
 
+def get_rf_size_degrees(popt, rf_shape, visual_field_range = 80):
+
+    amplitude, xo, yo, sigma_x, sigma_y, theta, offset = popt
+    
+    deg_per_pixel_x = visual_field_range / rf_shape[1]
+    deg_per_pixel_y = visual_field_range / rf_shape[0]
+
+    # get sigma_y in degrees
+    sigma_x = sigma_x * deg_per_pixel_x 
+    
+    # get sigma_y in degrees
+    sigma_y = sigma_y * deg_per_pixel_y 
+    
+    # get geometric mean of sigma_x and sigma_y in degrees
+    sigma_mean_deg = np.sqrt(sigma_x * sigma_y) 
+    
+    # get Full Width at Half Maximum in degrees
+    # https://github.com/fattsmellf/Focea-pRF-Fits/blob/main/pRF_examplecode.m
+    fwhm_deg = 2 *np.sqrt(2 * np.log(2)) * sigma_mean_deg 
+
+    return {'fwhm_degrees': fwhm_deg, 'size_degrees': sigma_mean_deg, 'sigma_x_degrees': sigma_x, 'sigma_y_degrees': sigma_y}
+
 def gaussian_2d(coords, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     """2D Gaussian function"""
     x, y = coords

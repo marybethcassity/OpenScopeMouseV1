@@ -4,6 +4,8 @@ Main script for analyzing preferred metrics from NWB files.
 
 Usage:
     python compute_pref_variables.py --data_dir /path/to/data 
+
+    ex: python compute_pref_variables.py --data_dir "X:\Personnel\MaryBeth\OpenScope\001568"
 """
 
 import argparse
@@ -13,6 +15,10 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
+
 
 from pynwb import NWBHDF5IO
 
@@ -90,12 +96,11 @@ Examples:
         help='Use curve fitting instead of argmax to determine preferred orientation, SF, and TF (default: False, uses argmax)'
     )
     
-    # Output options
     parser.add_argument(
         '--output_dir',
         type=str,
-        default='../results',
-        help='Base output directory (default: ../results)'
+        default=None,
+        help='Base output directory (default: <data_dir>/results)'
     )
     
     parser.add_argument(
@@ -283,8 +288,8 @@ def combine_existing_results(output_dir, args):
             plot_preferred_orientation_bar(probe_df, **shared_normalized_kwargs)
 
             bar_configs = [
-                (plot_preferred_tf_bar, [{"nested": False}, {"nested": True}]),
-                (plot_preferred_sf_bar, [{"nested": False}, {"nested": True}]),
+                (plot_preferred_tf_bar, [{"nested": False}, {"nested": True}, {"gaussian": True}, {"gaussian": True, "snapped": True}]),
+                (plot_preferred_sf_bar, [{"nested": False}, {"nested": True}, {"gaussian": True}, {"gaussian": True, "snapped": True}]),
             ]
 
             for plot_fn, variants in bar_configs:
@@ -297,6 +302,169 @@ def combine_existing_results(output_dir, args):
     print("=" * 80)
     print(f"Analysis complete! Results saved to: {output_dir}")
     print("=" * 80)
+
+def analyze_trial_times(nwb, mouse_name, nwb_path, mouse_output_dir):
+    
+    
+    subject_num = mouse_name.replace("sub-", "")
+
+
+    # dict_keys([
+    #   'drifting_gratings_field_block_presentations',
+    #   'flash_field_block_presentations',
+    #   'receptive_field_block_presentations',
+    #   'spontaneous_presentations'
+    # ])
+
+    blocks = {
+        "Gabor patches": "receptive_field_block_presentations",
+        "Drifting gratings": "drifting_gratings_field_block_presentations",
+        "Flash": "flash_field_block_presentations",
+        "Spontaneous": "spontaneous_presentations",
+    }
+
+    pairing = {}
+    stats = {}
+
+
+    for i in blocks:
+        pairing[i] = {"Trials": None, "Time": None}
+        stats[i] = {}
+        
+        rf = nwb.intervals[blocks[i]] # this is where the gabor patches live
+        df = rf.to_dataframe() # each row is 1 gabor stimulus representation
+        gabor_trials_num = len(df)
+        df['duration'] = df['stop_time'] - df['start_time']
+        total_gabor_time = df['duration'].sum()
+        print(f"{i} : {gabor_trials_num} trials = {total_gabor_time} minutes")
+        pairing[i]["Trials"] = gabor_trials_num
+        pairing[i]["Time"] = total_gabor_time
+
+        # statistics for the csv file
+        stats[i]["Median"] = df['duration'].median()
+        stats[i]["Mean"] = df['duration'].mean()
+        stats[i]["Max"] = df['duration'].max()
+        stats[i]["Min"] = df['duration'].min()
+
+    # create csv file of statistics
+    df_stats = pd.DataFrame.from_dict(stats, orient='index')
+    csv_path = mouse_output_dir / "ecephys_trial_time_stats.csv"
+    df_stats.to_csv(csv_path)
+    print(f"Saved trial time stats to {csv_path}")
+
+
+    labels = list(pairing.keys())
+    times = [round(pairing[label]["Time"]) for label in labels] # round the times just for simplicity
+    for i in range(len(labels)):
+        print(f"{labels[i]}: {times[i]} minutes")
+    
+    colors = [
+        "#C44E52",  # red
+        "#55A868",  # green
+        "#4C72B0",  # blue
+        "#8172B3",  # purple
+    ]
+
+    plt.figure(figsize=(16, 2))
+    plt.title(f"Ecephys: sub-{subject_num}", y = 1.65, fontsize=13, fontweight="bold", pad=20)
+
+    left = 0  # where the current segment starts
+
+    MIN_WIDTH_FOR_INSIDE = 100
+
+    label_slots = [0.6, -0.6, 1.0, -1.0]
+    used_slots = []
+
+    for label, time, color in zip(labels, times, colors):
+        plt.barh(
+            y=0,
+            width=time,
+            left=left,
+            color=color,
+            edgecolor="none"
+        )
+
+        center_x = left + time / 2
+
+        plt.axvline(
+            x=left + time,
+            color="gray",
+            linewidth=2,
+            zorder=5
+        )
+
+        if time >= MIN_WIDTH_FOR_INSIDE:
+            # Inside label
+            plt.text(
+                center_x,
+                0,
+                label,
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=10,
+            )
+
+        else:
+            # Choose a free slot
+            for slot in label_slots:
+                if slot not in used_slots:
+                    y_offset = slot
+                    used_slots.append(slot)
+                    break
+            else:
+                # Fallback: stack higher if all slots used
+                y_offset = max(label_slots) + 0.4
+                label_slots.append(y_offset)
+                used_slots.append(y_offset)
+
+            plt.annotate(
+                label,
+                xy=(left + time, 0),
+                xytext=(left + time + 5, y_offset),
+                ha="left",
+                va="center",
+                fontsize=10,
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color=color,
+                    lw=1
+                )
+            )
+
+        left += time
+    plt.yticks([])
+    plt.xlabel("Time (minutes)", fontweight = "bold")
+
+    # add a summary box
+    summary_text = ""
+    summed = 0
+    for i in pairing:
+        summary_text += f"{i}: {pairing[i]['Trials']} Trials = {round(pairing[i]['Time'])} Minutes\n"
+        summed += round(pairing[i]['Time'])
+    summary_text += f"Total: {summed} Minutes"
+
+
+
+
+    plt.text(
+        0.5, 1.4,                      
+        summary_text,
+        transform=plt.gca().transAxes, 
+        ha="center",
+        va="center",
+        fontsize=11,
+        #fontweight="bold",
+        bbox=dict(
+            boxstyle="round,pad=0.4",
+            facecolor="white",
+            edgecolor="black"
+        )
+    )
+
+    plt.savefig(mouse_output_dir / f"{subject_num}_ecephys_plot.png", dpi=300, bbox_inches="tight")
+    plot_path = mouse_output_dir / f"{subject_num}_ecephys_plot.png"
+    print(f"Saved trial time plot to {plot_path}")
 
 
 def main():
@@ -328,6 +496,8 @@ def main():
     
     # Create main output directory with arguments in the name
     from utils import create_results_directory
+    if args.output_dir is None:
+        args.output_dir = str(Path(args.data_dir) / 'results')
     main_output_dir = create_results_directory(args)
     
     print(f"Output directory: {main_output_dir}")
@@ -374,6 +544,15 @@ def main():
                 'rf_stim_table': rf_stim_table,
                 'dg_stim_table': dg_stim_table
             }
+
+            analyze_trial_times(
+                nwb=nwb,
+                mouse_name=mouse_name,
+                nwb_path=nwb_path,
+                mouse_output_dir=mouse_output_dir
+            )
+
+
 
             # Determine which probes to analyze for this mouse
             if args.probe:
@@ -590,8 +769,8 @@ def main():
                 plot_preferred_orientation_bar(probe_df, **shared_normalized_kwargs)
 
                 bar_configs = [
-                    (plot_preferred_tf_bar, [{"nested": False}, {"nested": True}]),
-                    (plot_preferred_sf_bar, [{"nested": False}, {"nested": True}]),
+                    (plot_preferred_tf_bar, [{"nested": False}, {"nested": True}, {"gaussian": True}, {"gaussian": True, "snapped": True}]),
+                    (plot_preferred_sf_bar, [{"nested": False}, {"nested": True}, {"gaussian": True}, {"gaussian": True, "snapped": True}]),
                 ]
 
                 for plot_fn, variants in bar_configs:

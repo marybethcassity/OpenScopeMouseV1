@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from scipy.optimize import curve_fit
+from scipy.spatial import cKDTree
 from matplotlib.colors import ListedColormap
 import pandas as pd
 
@@ -38,8 +39,8 @@ def plot_metric_distributions(df, units_data, output_dir, probe_name=None):
         mouse_name=mouse_name,
     )
 
-    # OSI distribution (non-nested and nested)
-    for variant_kwargs in [{"nested": False}, {"nested": True}]:
+    # OSI distribution (non-nested, nested, and gaussian)
+    for variant_kwargs in [{"nested": False}, {"nested": True}, {"gaussian": True}]:
         plot_orientation_selectivity(df, n_hist_bins=20, **shared_kwargs, **variant_kwargs)
 
     # DSI distribution (no nested version)
@@ -55,10 +56,20 @@ def plot_metric_distributions(df, units_data, output_dir, probe_name=None):
     # Preferred orientation bar (no nested version)
     plot_preferred_orientation_bar(df, **shared_kwargs)
 
-    # Preferred TF and SF bar charts (non-nested and nested)
+    # Preferred TF and SF bar charts (non-nested, nested, gaussian, and gaussian snapped)
     bar_configs = [
-        (plot_preferred_tf_bar, [{"nested": False}, {"nested": True}]),
-        (plot_preferred_sf_bar, [{"nested": False}, {"nested": True}]),
+        (plot_preferred_tf_bar, [
+            {"nested": False},
+            {"nested": True},
+            {"gaussian": True},
+            {"gaussian": True, "snapped": True},
+        ]),
+        (plot_preferred_sf_bar, [
+            {"nested": False},
+            {"nested": True},
+            {"gaussian": True},
+            {"gaussian": True, "snapped": True},
+        ]),
     ]
 
     for plot_fn, variants in bar_configs:
@@ -84,26 +95,54 @@ def plot_metric_distributions(df, units_data, output_dir, probe_name=None):
             (plot_osi_by_rf_from_csv, [
                 {"nested": False},
                 {"nested": True},
+                {"gaussian": True},
                 {"nested": False, "binned": True},
                 {"nested": True,  "binned": True},
+                {"gaussian": True, "binned": True},
             ]),
             (plot_preferred_tf_by_rf_from_csv, [
                 {"nested": False},
                 {"nested": True},
+                {"gaussian": True},
+                {"gaussian": True, "snapped": True},
                 {"nested": False, "binned": True},
                 {"nested": True,  "binned": True},
+                {"gaussian": True, "binned": True},
+                {"gaussian": True, "snapped": True, "binned": True},
             ]),
             (plot_preferred_sf_by_rf_from_csv, [
                 {"nested": False},
                 {"nested": True},
+                {"gaussian": True},
+                {"gaussian": True, "snapped": True},
                 {"nested": False, "binned": True},
                 {"nested": True,  "binned": True},
+                {"gaussian": True, "binned": True},
+                {"gaussian": True, "snapped": True, "binned": True},
             ]),
         ]
 
         for plot_fn, variants in rf_configs:
             for variant_kwargs in variants:
                 plot_fn(df, filtered_rfs, **rf_shared_kwargs, **variant_kwargs)
+
+        # FWHM heatmap
+        if 'rf_fwhm_deg' in df.columns:
+            plot_rf_fwhm_heatmap(
+                df,
+                output_dir=output_dir,
+                probe_name=probe_name,
+                mouse_name=mouse_name,
+            )
+
+        # Scatter heatmap
+        plot_rf_scatter_heatmap(
+            df,
+            output_dir=output_dir,
+            probe_name=probe_name,
+            mouse_name=mouse_name,
+        )
+
 
 def plot_summary_figures(df, units_data, output_dir, probe_name=None):
     """
@@ -128,7 +167,6 @@ def plot_summary_figures(df, units_data, output_dir, probe_name=None):
     # Extract RFs from the DataFrame 'rf' column
     filtered_rfs = None
     if 'rf' in df.columns:
-        # Extract RF arrays from DataFrame
         filtered_rfs = [rf for rf in df['rf'].values if rf is not None]
         if len(filtered_rfs) == 0:
             filtered_rfs = None
@@ -150,9 +188,7 @@ def plot_summary_figures(df, units_data, output_dir, probe_name=None):
     
     # Check if we have RF center data
     if 'rf_x_center' in df.columns and 'rf_y_center' in df.columns:
-        # Define all plot functions and their variant configurations
         plot_configs = [
-            # (function, variants) - variants are lists of kwargs to pass
             (plot_preferred_orientation_by_rf_from_csv, [
                 {"binned": True},
                 {"binned": False},
@@ -160,24 +196,33 @@ def plot_summary_figures(df, units_data, output_dir, probe_name=None):
             (plot_osi_by_rf_from_csv, [
                 {"nested": False},
                 {"nested": True},
+                {"gaussian": True},
                 {"nested": False, "binned": True},
                 {"nested": True,  "binned": True},
+                {"gaussian": True, "binned": True},
             ]),
             (plot_preferred_tf_by_rf_from_csv, [
                 {"nested": False},
                 {"nested": True},
+                {"gaussian": True},
+                {"gaussian": True, "snapped": True},
                 {"nested": False, "binned": True},
                 {"nested": True,  "binned": True},
+                {"gaussian": True, "binned": True},
+                {"gaussian": True, "snapped": True, "binned": True},
             ]),
             (plot_preferred_sf_by_rf_from_csv, [
                 {"nested": False},
                 {"nested": True},
+                {"gaussian": True},
+                {"gaussian": True, "snapped": True},
                 {"nested": False, "binned": True},
                 {"nested": True,  "binned": True},
+                {"gaussian": True, "binned": True},
+                {"gaussian": True, "snapped": True, "binned": True},
             ]),
         ]
 
-        # Shared kwargs for all plots
         shared_kwargs = dict(
             output_dir=output_dir,
             probe_name=probe_name,
@@ -185,12 +230,10 @@ def plot_summary_figures(df, units_data, output_dir, probe_name=None):
             background=False,
         )
 
-        # Call all combinations
         for plot_fn, variants in plot_configs:
             for variant_kwargs in variants:
                 plot_fn(df, filtered_rfs, **shared_kwargs, **variant_kwargs)
         
-        # Plot RF position vs preferred orientation
         plot_rf_position_vs_pref_ori_from_csv(
             df,
             save_path_x=output_dir / 'rf_x_position_vs_pref_ori.png',
@@ -199,7 +242,6 @@ def plot_summary_figures(df, units_data, output_dir, probe_name=None):
             mouse_name=mouse_name
         )
         
-        # Plot RF position vs preferred temporal frequency
         plot_rf_position_vs_pref_tf_from_csv(
             df,
             save_path_x=output_dir / 'rf_x_position_vs_pref_tf.png',
@@ -208,7 +250,6 @@ def plot_summary_figures(df, units_data, output_dir, probe_name=None):
             mouse_name=mouse_name
         )
         
-        # Plot RF position vs preferred spatial frequency
         plot_rf_position_vs_pref_sf_from_csv(
             df,
             save_path_x=output_dir / 'rf_x_position_vs_pref_sf.png',
@@ -216,6 +257,23 @@ def plot_summary_figures(df, units_data, output_dir, probe_name=None):
             probe_name=probe_name,
             mouse_name=mouse_name
         )
+
+        if 'rf_fwhm_deg' in df.columns:
+            plot_rf_fwhm_heatmap(
+                df,
+                output_dir=output_dir,
+                probe_name=probe_name,
+                mouse_name=mouse_name,
+            )
+
+        plot_rf_scatter_heatmap(
+            df,
+            output_dir=output_dir,
+            probe_name=probe_name,
+            mouse_name=mouse_name,
+        )
+
+
 # ============================================================================
 # Core plotting functions from preferred_metrics_new.ipynb
 # ============================================================================
@@ -241,7 +299,6 @@ def plot_avg_rf(df,
     mouse_name : str, optional
         Mouse name for title
     """
-    # Filter out rows without RF center data
     df = df.dropna(subset=['rf_x_center', 'rf_y_center'])
     
     if len(df) == 0:
@@ -255,17 +312,13 @@ def plot_avg_rf(df,
     x_positions = df['rf_x_center'].values
     y_positions = df['rf_y_center'].values
     
-    # Create plot
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Calculate and plot average RF
     average_rf = np.mean(filtered_rfs, axis=0)
     
-    # Get RF extent from positions
     x_min, x_max = -40, 40
     y_min, y_max = -40, 40
     
-    # Add padding
     x_padding = (x_max - x_min) * 0.1
     y_padding = (y_max - y_min) * 0.1
     
@@ -279,7 +332,6 @@ def plot_avg_rf(df,
     ax.set_xlabel('RF Center X Position (degrees)', fontsize=14)
     ax.set_ylabel('RF Center Y Position (degrees)', fontsize=14)
     
-    # Create title
     title = f'Average Receptive Field\n({len(filtered_rfs)} cells)'
     if mouse_name and probe_name:
         title = f'{mouse_name} - {probe_name}\n' + title
@@ -298,6 +350,7 @@ def plot_avg_rf(df,
     
     plt.close()
 
+
 def plot_orientation_selectivity(peak_df,
                                  si_range=(0, 1),
                                  n_hist_bins=20,
@@ -306,18 +359,30 @@ def plot_orientation_selectivity(peak_df,
                                  density=True,
                                  probe_name=None,
                                  mouse_name=None,
-                                 nested=False):
+                                 nested=False,
+                                 gaussian=False):
     """
     Plot orientation selectivity histogram.
 
     Parameters
     ----------
     nested : bool, default=False
-        If True, use nested OSI values
+        If True, use nested OSI values (ignored if gaussian=True).
+    gaussian : bool, default=False
+        If True, use gaussian-fit OSI values. Takes priority over nested.
     """
     vis_cells = (peak_df.peak_dff_dg > peak_dff_min)
 
-    if nested:
+    if gaussian:
+        col = 'osi_dg_gaussian'
+        if col not in peak_df.columns:
+            print(f"Column '{col}' not found, skipping gaussian OSI plot")
+            return
+        osi_cells = vis_cells & (peak_df[col] > si_range[0]) & (peak_df[col] < si_range[1])
+        osis = peak_df.loc[osi_cells][col].values
+        title = f'Gaussian Orientation Selectivity Distribution\n({len(osis)} cells)'
+        save_path = output_dir / 'osi_distribution_gaussian.png' if output_dir else None
+    elif nested:
         osi_cells = vis_cells & (peak_df.osi_dg_nested > si_range[0]) & (peak_df.osi_dg_nested < si_range[1])
         osis = peak_df.loc[osi_cells].osi_dg_nested.values
         title = f'Nested Orientation Selectivity Distribution\n({len(osis)} cells)'
@@ -375,10 +440,7 @@ def plot_direction_selectivity(peak_df,
     """
     Plot direction selectivity index (DSI) histogram.
     """
-    # Filter responsive cells
     vis_cells = (peak_df.peak_dff_dg > peak_dff_min)
-    
-    # Filter direction selective cells
     dsi_cells = vis_cells & (peak_df.dsi_dg > si_range[0]) & (peak_df.dsi_dg < si_range[1])
     
     peak_dsi = peak_df.loc[dsi_cells]
@@ -388,7 +450,6 @@ def plot_direction_selectivity(peak_df,
         print("No cells passed DSI filter")
         return
     
-    # Plot histogram
     fig, ax = plt.subplots(figsize=(8, 6))
 
     ax.hist(dsis, bins=n_hist_bins, edgecolor='black', alpha=0.7, 
@@ -397,7 +458,6 @@ def plot_direction_selectivity(peak_df,
     ylabel = 'Number of Cells (Normalized)' if density else 'Number of Cells'
     ax.set_ylabel(ylabel, fontsize=12)
     
-    # Create title with probe and mouse info
     title = f'Direction Selectivity Distribution\n({len(dsis)} cells)'
     if mouse_name and probe_name:
         title = f'{mouse_name} - {probe_name}\n' + title
@@ -409,7 +469,6 @@ def plot_direction_selectivity(peak_df,
     ax.set_title(title, fontsize=14, fontweight='bold')
     ax.grid(True, alpha=0.3, axis='y')
     
-    # Add stats text
     stats_text = f'Mean: {np.mean(dsis):.3f}\nMedian: {np.median(dsis):.3f}'
     ax.text(0.95, 0.95, stats_text, transform=ax.transAxes,
             verticalalignment='top', horizontalalignment='right',
@@ -420,7 +479,6 @@ def plot_direction_selectivity(peak_df,
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        #print(f"✓ Saved DSI figure to: {save_path}")
     
     plt.close()
 
@@ -434,11 +492,6 @@ def plot_preferred_orientation_bar(peak_df,
                                    normalize=False):
     """
     Plot preferred orientation as a bar histogram.
-
-    Parameters
-    ----------
-    normalize : bool, default=False
-        If True, normalize counts to percentages (0-100)
     """
     vis_cells = (peak_df.peak_dff_dg > peak_dff_min)
     pref_oris = peak_df.loc[vis_cells].pref_ori.dropna().values
@@ -493,31 +546,52 @@ def plot_preferred_tf_bar(peak_df,
                           probe_name=None,
                           mouse_name=None,
                           normalize=False,
-                          nested=False):
+                          nested=False,
+                          gaussian=False,
+                          snapped=False):
     """
     Plot preferred temporal frequency as a bar histogram.
 
     Parameters
     ----------
     nested : bool, default=False
-        If True, use nested preferred TF values
-    normalize : bool, default=False
-        If True, normalize counts to percentages (0-100)
+        If True, use nested preferred TF values (ignored if gaussian=True).
+    gaussian : bool, default=False
+        If True, use gaussian-fit preferred TF values. Takes priority over nested.
+    snapped : bool, default=False
+        If True (and gaussian=True), use gaussian values snapped to nearest
+        presented stimulus value (pref_tf_gaussian_snapped).
     """
     vis_cells = (peak_df.peak_dff_dg > peak_dff_min)
 
-    if nested:
+    if gaussian:
+        if snapped:
+            col = 'pref_tf_gaussian_snapped'
+            title_prefix = 'Gaussian (Snapped) Preferred Temporal Frequency Distribution'
+            filename = 'pref_tf_distribution_gaussian_snapped.png'
+        else:
+            col = 'pref_tf_gaussian'
+            title_prefix = 'Gaussian Preferred Temporal Frequency Distribution'
+            filename = 'pref_tf_distribution_gaussian.png'
+        if col not in peak_df.columns:
+            print(f"Column '{col}' not found, skipping plot")
+            return
+        pref_tfs = peak_df.loc[vis_cells][col].dropna().values
+        save_path = output_dir / filename if output_dir else None
+    elif nested:
         pref_tfs = peak_df.loc[vis_cells].pref_tf_nested.dropna().values
-        title = f'Nested Preferred Temporal Frequency Distribution\n({len(pref_tfs)} cells)'
+        title_prefix = 'Nested Preferred Temporal Frequency Distribution'
         save_path = output_dir / 'pref_tf_distribution_nested.png' if output_dir else None
     else:
         pref_tfs = peak_df.loc[vis_cells].pref_tf.dropna().values
-        title = f'Preferred Temporal Frequency Distribution\n({len(pref_tfs)} cells)'
+        title_prefix = 'Preferred Temporal Frequency Distribution'
         save_path = output_dir / 'pref_tf_distribution.png' if output_dir else None
 
     if len(pref_tfs) == 0:
         print("No cells with preferred temporal frequency data")
         return
+
+    title = f'{title_prefix}\n({len(pref_tfs)} cells)'
 
     unique_tfs = np.sort(np.unique(pref_tfs))
     counts = np.array([np.sum(pref_tfs == tf) for tf in unique_tfs])
@@ -554,7 +628,6 @@ def plot_preferred_tf_bar(peak_df,
 
     plt.close()
 
-
 def plot_preferred_sf_bar(peak_df,
                           peak_dff_min=1.0,
                           output_dir=None,
@@ -562,31 +635,52 @@ def plot_preferred_sf_bar(peak_df,
                           probe_name=None,
                           mouse_name=None,
                           normalize=False,
-                          nested=False):
+                          nested=False,
+                          gaussian=False,
+                          snapped=False):
     """
     Plot preferred spatial frequency as a bar histogram.
 
     Parameters
     ----------
     nested : bool, default=False
-        If True, use nested preferred SF values
-    normalize : bool, default=False
-        If True, normalize counts to percentages (0-100)
+        If True, use nested preferred SF values (ignored if gaussian=True).
+    gaussian : bool, default=False
+        If True, use gaussian-fit preferred SF values. Takes priority over nested.
+    snapped : bool, default=False
+        If True (and gaussian=True), use gaussian values snapped to nearest
+        presented stimulus value (pref_sf_gaussian_snapped).
     """
     vis_cells = (peak_df.peak_dff_dg > peak_dff_min)
 
-    if nested:
+    if gaussian:
+        if snapped:
+            col = 'pref_sf_gaussian_snapped'
+            title_prefix = 'Gaussian (Snapped) Preferred Spatial Frequency Distribution'
+            filename = 'pref_sf_distribution_gaussian_snapped.png'
+        else:
+            col = 'pref_sf_gaussian'
+            title_prefix = 'Gaussian Preferred Spatial Frequency Distribution'
+            filename = 'pref_sf_distribution_gaussian.png'
+        if col not in peak_df.columns:
+            print(f"Column '{col}' not found, skipping plot")
+            return
+        pref_sfs = peak_df.loc[vis_cells][col].dropna().values
+        save_path = output_dir / filename if output_dir else None
+    elif nested:
         pref_sfs = peak_df.loc[vis_cells].pref_sf_nested.dropna().values
-        title = f'Nested Preferred Spatial Frequency Distribution\n({len(pref_sfs)} cells)'
+        title_prefix = 'Nested Preferred Spatial Frequency Distribution'
         save_path = output_dir / 'pref_sf_distribution_nested.png' if output_dir else None
     else:
         pref_sfs = peak_df.loc[vis_cells].pref_sf.dropna().values
-        title = f'Preferred Spatial Frequency Distribution\n({len(pref_sfs)} cells)'
+        title_prefix = 'Preferred Spatial Frequency Distribution'
         save_path = output_dir / 'pref_sf_distribution.png' if output_dir else None
 
     if len(pref_sfs) == 0:
         print("No cells with preferred spatial frequency data")
         return
+
+    title = f'{title_prefix}\n({len(pref_sfs)} cells)'
 
     unique_sfs = np.sort(np.unique(pref_sfs))
     counts = np.array([np.sum(pref_sfs == sf) for sf in unique_sfs])
@@ -623,66 +717,65 @@ def plot_preferred_sf_bar(peak_df,
 
     plt.close()
 
+# TO DO: fix plotting colors: discrete not non binned, and add colorbar for binned
+def plot_preferred_orientation_by_rf_from_csv(
+        combined_df,
+        filtered_rfs,
+        output_dir=None,
+        probe_name=None,
+        mouse_name=None,
+        background=False,
+        binned=False):
 
-def plot_preferred_orientation_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
-                                              probe_name=None, mouse_name=None, background=True, binned=False):
     """
-    Plot RF centers colored by preferred orientation with average RF background.
-    Uses CSV data with RF centers already computed.
-    
-    Parameters:
-    -----------
-    combined_df : DataFrame
-        Results dataframe with RF center positions
-    filtered_rfs : list or array
-        List of receptive field arrays (2D) for each unit
-    output_dir : str or Path, optional
-        Path to save figure
-    probe_name : str, optional
-        Probe name for title
-    mouse_name : str, optional
-        Mouse name for title
-    background : bool
-        Whether to show average RF as background
-    binned : bool
-        Whether to bin units into 5x5 degree squares and show mode orientation
+    Plot RF centers colored by preferred orientation with optional
+    average RF background and optional spatial binning.
     """
-    df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
-    
-    if len(df) == 0:
-        print("No valid RF center data found")
+
+    df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center', 'pref_ori'])
+
+    if df.empty:
+        print("No valid RF center/orientation data found.")
         return
-    
+
     x_positions = df['rf_x_center'].values
     y_positions = df['rf_y_center'].values
     preferred_oris = df['pref_ori'].values
-    
-    unique_oris = np.unique(preferred_oris)
-    colors = ListedColormap(plt.cm.tab10.colors[:len(unique_oris)])
+
+    # --- Unique orientations & colormap ---
+    unique_oris = np.sort(np.unique(preferred_oris))
+    cmap = plt.cm.get_cmap('Spectral', len(unique_oris))
     ori_to_idx = {ori: i for i, ori in enumerate(unique_oris)}
 
+    # --- Title & save path ---
     title = f'RF Centers Colored by {"Binned " if binned else ""}Preferred Orientation\n({len(df)} cells)'
     filename = 'rf_centers_by_preferred_orientation_binned' if binned else 'rf_centers_by_preferred_orientation'
     save_path = output_dir / f'{filename}.png' if output_dir else None
 
+    # --- RF bounds ---
     x_min, x_max = -40, 40
     y_min, y_max = -40, 40
-    x_padding = 0
-    y_padding = 0
 
     fig, ax = plt.subplots(figsize=(12, 10))
 
-    if filtered_rfs is not None and len(filtered_rfs) > 0:
+    # --- Background average RF ---
+    if background and filtered_rfs is not None and len(filtered_rfs) > 0:
         average_rf = np.mean(filtered_rfs, axis=0)
-        if background:
-            ax.imshow(average_rf, origin="lower", cmap='viridis', alpha=0.4,
-                      extent=[x_min - x_padding, x_max + x_padding,
-                               y_min - y_padding, y_max + y_padding],
-                      aspect='auto')
+        ax.imshow(
+            average_rf,
+            origin="lower",
+            cmap='viridis',
+            alpha=0.4,
+            extent=[x_min, x_max, y_min, y_max],
+            aspect='auto'
+        )
 
-    ax.set_xlim(x_min - x_padding, x_max + x_padding)
-    ax.set_ylim(y_min - y_padding, y_max + y_padding)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
 
+    # ==========================================================
+    # Binned mode
+    # ==========================================================
     if binned:
         bin_size = 5
         x_bins = np.arange(x_min, x_max + bin_size, bin_size)
@@ -690,7 +783,7 @@ def plot_preferred_orientation_by_rf_from_csv(combined_df, filtered_rfs, output_
 
         bin_x_centers = []
         bin_y_centers = []
-        bin_mode_ori = []
+        bin_mean_oris = []
 
         for x_start in x_bins[:-1]:
             for y_start in y_bins[:-1]:
@@ -698,37 +791,72 @@ def plot_preferred_orientation_by_rf_from_csv(combined_df, filtered_rfs, output_
                     (x_positions >= x_start) & (x_positions < x_start + bin_size) &
                     (y_positions >= y_start) & (y_positions < y_start + bin_size)
                 )
-                if in_bin.sum() > 0:
-                    bin_x_centers.append(x_start + bin_size / 2)
-                    bin_y_centers.append(y_start + bin_size / 2)
-                    bin_mode_ori.append(pd.Series(preferred_oris[in_bin]).mode()[0])
+                if not np.any(in_bin):
+                    continue
 
-        for ori in unique_oris:
-            mask = np.array(bin_mode_ori) == ori
-            if mask.sum() > 0:
-                ax.scatter(np.array(bin_x_centers)[mask], np.array(bin_y_centers)[mask],
-                           color=colors(ori_to_idx[ori]), label=f'{int(ori)}°',
-                           s=200, alpha=0.9, edgecolors='black', linewidths=1.0)
+                bin_x_centers.append(x_start + bin_size / 2)
+                bin_y_centers.append(y_start + bin_size / 2)
+                bin_mean_oris.append(np.mean(preferred_oris[in_bin]))
+
+        ori_min = np.min(unique_oris)
+        ori_max = np.max(unique_oris)
+
+        # Single scatter call + single colorbar, outside the loop
+        sc = ax.scatter(
+            bin_x_centers,
+            bin_y_centers,
+            c=bin_mean_oris,
+            cmap=plt.cm.Spectral,
+            vmin=ori_min,
+            vmax=ori_max,
+            s=220,
+            alpha=0.9,
+            edgecolors='black',
+            linewidths=1.0
+        )
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label('Mean Preferred Orientation (°)', fontsize=12)
+
+    # ==========================================================
+    # Raw scatter mode
+    # ==========================================================
     else:
         for ori in unique_oris:
-            ori_mask = (preferred_oris == ori)
-            ax.scatter(x_positions[ori_mask], y_positions[ori_mask],
-                       color=colors(ori_to_idx[ori]), label=f'{int(ori)}°',
-                       s=100, alpha=0.8, edgecolors='black', linewidths=1.0)
+            ori_mask = preferred_oris == ori
+            ax.scatter(
+                x_positions[ori_mask],
+                y_positions[ori_mask],
+                color=cmap(ori_to_idx[ori]),
+                label=f'{int(ori)}°',
+                s=100,
+                alpha=0.85,
+                edgecolors='black',
+                linewidths=1.0
+            )
 
+            ax.legend(
+            title='Preferred Orientation',
+            bbox_to_anchor=(1.05, 1),
+            loc='upper left',
+            fontsize=10,
+            title_fontsize=11
+        )
+
+
+    # --- Labels ---
     ax.set_xlabel('RF Center X Position (degrees)', fontsize=14)
     ax.set_ylabel('RF Center Y Position (degrees)', fontsize=14)
 
+    # --- Title prefix ---
     if mouse_name and probe_name:
-        title = f'{mouse_name} - {probe_name}\n' + title
+        title = f'{mouse_name} - {probe_name}\n{title}'
     elif probe_name:
-        title = f'{probe_name}\n' + title
+        title = f'{probe_name}\n{title}'
     elif mouse_name:
-        title = f'{mouse_name}\n' + title
+        title = f'{mouse_name}\n{title}'
 
     ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-    ax.legend(title='Preferred Orientation', bbox_to_anchor=(1.05, 1),
-              loc='upper left', fontsize=10, title_fontsize=11)
+        
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal')
 
@@ -739,32 +867,22 @@ def plot_preferred_orientation_by_rf_from_csv(combined_df, filtered_rfs, output_
 
     plt.close()
 
+
 def plot_osi_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
-                                     probe_name=None, mouse_name=None, background=True, nested=False, binned=False):
+                            probe_name=None, mouse_name=None, background=False,
+                            nested=False, binned=False, gaussian=False):
     """
-    Plot RF centers colored by osi with average RF background.
-    Uses CSV data with RF centers already computed.
-    
-    Parameters:
-    -----------
-    combined_df : DataFrame
-        Results dataframe with RF center positions
-    filtered_rfs : list or array
-        List of receptive field arrays (2D) for each unit
-    output_dir : str or Path, optional
-        Path to save figure
-    probe_name : str, optional
-        Probe name for title
-    mouse_name : str, optional
-        Mouse name for title
-    background : bool
-        Whether to show average RF as background
-    nested : bool
-        Whether to use nested OSI values
-    binned : bool
-        Whether to bin units into 5x5 degree squares and show average OSI
+    Plot RF centers colored by OSI with average RF background.
+
+    Parameters
+    ----------
+    nested : bool, default=False
+        If True, use nested OSI values (ignored if gaussian=True).
+    gaussian : bool, default=False
+        If True, use gaussian-fit OSI values. Takes priority over nested.
+    binned : bool, default=False
+        If True, bin RF centers and show mean OSI per bin.
     """
-    # Filter out rows without RF center data
     df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
     
     if len(df) == 0:
@@ -774,7 +892,15 @@ def plot_osi_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
     x_positions = df['rf_x_center'].values
     y_positions = df['rf_y_center'].values
     
-    if nested:
+    if gaussian:
+        col = 'osi_dg_gaussian'
+        if col not in df.columns:
+            print(f"Column '{col}' not found, skipping gaussian OSI RF plot")
+            return
+        osis = df[col].values
+        title = f'RF Centers Colored by Gaussian {"Binned " if binned else ""}OSI\n({len(df)} cells)'
+        suffix = 'osi_gaussian'
+    elif nested:
         osis = df['osi_dg_nested'].values
         title = f'RF Centers Colored by Nested {"Binned " if binned else ""}OSI\n({len(df)} cells)'
         suffix = 'osi_nested'
@@ -783,35 +909,30 @@ def plot_osi_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
         title = f'RF Centers Colored by {"Binned " if binned else ""}OSI\n({len(df)} cells)'
         suffix = 'osi'
 
-    # Build save path based on flags
     filename = f'rf_centers_by_{suffix}'
     if binned:
         filename += '_binned'
     save_path = output_dir / f'{filename}.png' if output_dir else None
 
-    # Set up colormap — continuous for binned, categorical otherwise
     x_min, x_max = -40, 40
     y_min, y_max = -40, 40
     x_padding = 0
     y_padding = 0
 
-    # Create plot
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Calculate and plot average RF as background
     if filtered_rfs is not None and len(filtered_rfs) > 0:
         average_rf = np.mean(filtered_rfs, axis=0)
         if background:
             ax.imshow(average_rf, origin="lower", cmap='viridis', alpha=0.4, 
-                        extent=[x_min - x_padding, x_max + x_padding, 
-                                y_min - y_padding, y_max + y_padding],
-                        aspect='auto')
+                      extent=[x_min - x_padding, x_max + x_padding, 
+                               y_min - y_padding, y_max + y_padding],
+                      aspect='auto')
     
     ax.set_xlim(x_min - x_padding, x_max + x_padding)
     ax.set_ylim(y_min - y_padding, y_max + y_padding)
 
     if binned:
-        # Bin units into 5x5 degree squares and compute mean OSI per bin
         bin_size = 5
         x_bins = np.arange(x_min, x_max + bin_size, bin_size)
         y_bins = np.arange(y_min, y_max + bin_size, bin_size)
@@ -829,28 +950,21 @@ def plot_osi_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
                 if in_bin.sum() > 0:
                     bin_x_centers.append(x_start + bin_size / 2)
                     bin_y_centers.append(y_start + bin_size / 2)
-                    bin_mean_osi.append(np.mean(osis[in_bin]))
+                    bin_mean_osi.append(np.nanmean(osis[in_bin]))
 
         bin_x_centers = np.array(bin_x_centers)
         bin_y_centers = np.array(bin_y_centers)
         bin_mean_osi = np.array(bin_mean_osi)
 
-        # Continuous colormap for OSI (0 to 1)
-        cmap = plt.cm.Spectral
         sc = ax.scatter(bin_x_centers, bin_y_centers,
-                        c=bin_mean_osi, cmap=cmap, vmin=0, vmax=1,
+                        c=bin_mean_osi, cmap=plt.cm.Spectral, vmin=0, vmax=1,
                         s=200, alpha=0.9, edgecolors='black', linewidths=1.0)
-
         cbar = plt.colorbar(sc, ax=ax)
         cbar.set_label('Mean OSI', fontsize=12)
-
     else:
-        # Continuous colormap for individual units
-        cmap = plt.cm.Spectral
         sc = ax.scatter(x_positions, y_positions,
-                        c=osis, cmap=cmap, vmin=0, vmax=1,
+                        c=osis, cmap=plt.cm.Spectral, vmin=0, vmax=1,
                         s=100, alpha=0.8, edgecolors='black', linewidths=1.0)
-
         cbar = plt.colorbar(sc, ax=ax)
         cbar.set_label('OSI', fontsize=12)
     
@@ -875,76 +989,61 @@ def plot_osi_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
     
     plt.close()
 
-
+# TO DO: fix plotting colors: discrete not non binned, and add colorbar for binned
 def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
-                                     probe_name=None, mouse_name=None, background=True, nested=False, binned=False):
-    """
-    Plot RF centers colored by preferred temporal frequency with average RF background.
-    Uses CSV data with RF centers already computed.
-    
-    Parameters:
-    -----------
-    combined_df : DataFrame
-        Results dataframe with RF center positions
-    filtered_rfs : list or array
-        List of receptive field arrays (2D) for each unit
-    output_dir : str or Path, optional
-        Path to save figure
-    probe_name : str, optional
-        Probe name for title
-    mouse_name : str, optional
-        Mouse name for title
-    background : bool
-        Whether to show average RF as background
-    nested : bool
-        Whether to use nested TF values
-    binned : bool
-        Whether to bin units into 5x5 degree squares and show mode TF
-    """
+                                     probe_name=None, mouse_name=None, background=False,
+                                     nested=False, binned=False, gaussian=False, snapped=False):
+
     df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
-    
+
     if len(df) == 0:
         print("No valid RF center data found")
         return
-    
+
     x_positions = df['rf_x_center'].values
     y_positions = df['rf_y_center'].values
-    
-    if nested:
+
+    # Select correct column
+    if gaussian:
+        if snapped:
+            col = 'pref_tf_gaussian_snapped'
+            suffix = 'tf_gaussian_snapped'
+        else:
+            col = 'pref_tf_gaussian'
+            suffix = 'tf_gaussian'
+        if col not in df.columns:
+            print(f"Column '{col}' not found")
+            return
+        preferred_tfs = df[col].values
+        label = 'Preferred TF (Hz)'
+    elif nested:
         preferred_tfs = df['pref_tf_nested'].values
-        title = f'RF Centers Colored by Nested {"Binned " if binned else ""}Preferred Temporal Frequency\n({len(df)} cells)'
         suffix = 'tf_nested'
+        label = 'Preferred TF (Hz)'
     else:
         preferred_tfs = df['pref_tf'].values
-        title = f'RF Centers Colored by {"Binned " if binned else ""}Preferred Temporal Frequency\n({len(df)} cells)'
         suffix = 'tf'
+        label = 'Preferred TF (Hz)'
 
     filename = f'rf_centers_by_preferred_{suffix}'
     if binned:
         filename += '_binned'
     save_path = output_dir / f'{filename}.png' if output_dir else None
 
-    unique_tfs = np.unique(preferred_tfs)
-    colors = ListedColormap(plt.cm.tab10.colors[:len(unique_tfs)])
-    tf_to_idx = {tf: i for i, tf in enumerate(unique_tfs)}
-
     x_min, x_max = -40, 40
     y_min, y_max = -40, 40
-    x_padding = 0
-    y_padding = 0
 
     fig, ax = plt.subplots(figsize=(12, 10))
 
-    if filtered_rfs is not None and len(filtered_rfs) > 0:
+    # Background RF
+    if filtered_rfs is not None and len(filtered_rfs) > 0 and background:
         average_rf = np.mean(filtered_rfs, axis=0)
-        if background:
-            ax.imshow(average_rf, origin="lower", cmap='viridis', alpha=0.4,
-                      extent=[x_min - x_padding, x_max + x_padding,
-                               y_min - y_padding, y_max + y_padding],
-                      aspect='auto')
+        ax.imshow(average_rf, origin="lower", cmap='viridis', alpha=0.4,
+                  extent=[x_min, x_max, y_min, y_max],
+                  aspect='auto')
 
-    ax.set_xlim(x_min - x_padding, x_max + x_padding)
-    ax.set_ylim(y_min - y_padding, y_max + y_padding)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
 
     if binned:
         bin_size = 5
@@ -953,7 +1052,7 @@ def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
 
         bin_x_centers = []
         bin_y_centers = []
-        bin_mode_tf = []
+        bin_mean_tf = []
 
         for x_start in x_bins[:-1]:
             for y_start in y_bins[:-1]:
@@ -964,36 +1063,142 @@ def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
                 if in_bin.sum() > 0:
                     bin_x_centers.append(x_start + bin_size / 2)
                     bin_y_centers.append(y_start + bin_size / 2)
-                    mode_tf = pd.Series(preferred_tfs[in_bin]).mode()[0]
-                    bin_mode_tf.append(mode_tf)
+                    bin_mean_tf.append(np.nanmean(preferred_tfs[in_bin]))
 
-        # Plot binned points, one scatter call per unique TF for clean legend
-        for tf in unique_tfs:
-            mask = np.array(bin_mode_tf) == tf
-            if mask.sum() > 0:
-                ax.scatter(np.array(bin_x_centers)[mask], np.array(bin_y_centers)[mask],
-                           color=colors(tf_to_idx[tf]), label=f'{tf:.1f} Hz',
-                           s=200, alpha=0.9, edgecolors='black', linewidths=1.0)
+        sc = ax.scatter(bin_x_centers, bin_y_centers,
+                        c=bin_mean_tf,
+                        cmap=plt.cm.Spectral,
+                        s=200,
+                        edgecolors='black',
+                        linewidths=1)
+
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label(f'Mean {label}', fontsize=12)
+
     else:
-        for tf in unique_tfs:
-            tf_mask = (preferred_tfs == tf)
-            ax.scatter(x_positions[tf_mask], y_positions[tf_mask],
-                       color=colors(tf_to_idx[tf]), label=f'{tf:.1f} Hz',
-                       s=100, alpha=0.8, edgecolors='black', linewidths=1.0)
+        sc = ax.scatter(x_positions, y_positions,
+                        c=preferred_tfs,
+                        cmap=plt.cm.Spectral,
+                        s=100,
+                        edgecolors='black',
+                        linewidths=1)
+
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label(label, fontsize=12)
 
     ax.set_xlabel('RF Center X Position (degrees)', fontsize=14)
     ax.set_ylabel('RF Center Y Position (degrees)', fontsize=14)
+    ax.set_title(f'RF Centers Colored by {label}', fontsize=16, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.set_aspect('equal')
 
-    if mouse_name and probe_name:
-        title = f'{mouse_name} - {probe_name}\n' + title
-    elif probe_name:
-        title = f'{probe_name}\n' + title
-    elif mouse_name:
-        title = f'{mouse_name}\n' + title
+    plt.tight_layout()
 
-    ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-    ax.legend(title='Preferred TF', bbox_to_anchor=(1.05, 1),
-              loc='upper left', fontsize=10, title_fontsize=11)
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    plt.close()
+
+# TO DO: fix plotting colors: discrete not non binned, and add colorbar for binned
+def plot_preferred_sf_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
+                                     probe_name=None, mouse_name=None, background=False,
+                                     nested=False, binned=False, gaussian=False, snapped=False):
+
+    df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
+
+    if len(df) == 0:
+        print("No valid RF center data found")
+        return
+
+    x_positions = df['rf_x_center'].values
+    y_positions = df['rf_y_center'].values
+
+    # Select correct column
+    if gaussian:
+        if snapped:
+            col = 'pref_sf_gaussian_snapped'
+            suffix = 'sf_gaussian_snapped'
+        else:
+            col = 'pref_sf_gaussian'
+            suffix = 'sf_gaussian'
+        if col not in df.columns:
+            print(f"Column '{col}' not found")
+            return
+        preferred_sfs = df[col].values
+        label = 'Preferred SF (cpd)'
+    elif nested:
+        preferred_sfs = df['pref_sf_nested'].values
+        suffix = 'sf_nested'
+        label = 'Preferred SF (cpd)'
+    else:
+        preferred_sfs = df['pref_sf'].values
+        suffix = 'sf'
+        label = 'Preferred SF (cpd)'
+        
+    filename = f'rf_centers_by_preferred_{suffix}'
+    if binned:
+        filename += '_binned'
+    save_path = output_dir / f'{filename}.png' if output_dir else None
+
+    x_min, x_max = -40, 40
+    y_min, y_max = -40, 40
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+
+    # Background RF
+    if filtered_rfs is not None and len(filtered_rfs) > 0 and background:
+        average_rf = np.mean(filtered_rfs, axis=0)
+        ax.imshow(average_rf, origin="lower", cmap='viridis', alpha=0.4,
+                  extent=[x_min, x_max, y_min, y_max],
+                  aspect='auto')
+
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+
+    if binned:
+        bin_size = 5
+        x_bins = np.arange(x_min, x_max + bin_size, bin_size)
+        y_bins = np.arange(y_min, y_max + bin_size, bin_size)
+
+        bin_x_centers = []
+        bin_y_centers = []
+        bin_mean_sf = []
+
+        for x_start in x_bins[:-1]:
+            for y_start in y_bins[:-1]:
+                in_bin = (
+                    (x_positions >= x_start) & (x_positions < x_start + bin_size) &
+                    (y_positions >= y_start) & (y_positions < y_start + bin_size)
+                )
+                if in_bin.sum() > 0:
+                    bin_x_centers.append(x_start + bin_size / 2)
+                    bin_y_centers.append(y_start + bin_size / 2)
+                    bin_mean_sf.append(np.nanmean(preferred_sfs[in_bin]))
+
+        sc = ax.scatter(bin_x_centers, bin_y_centers,
+                        c=bin_mean_sf,
+                        cmap=plt.cm.Spectral,
+                        s=200,
+                        edgecolors='black',
+                        linewidths=1)
+
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label(f'Mean {label}', fontsize=12)
+
+    else:
+        sc = ax.scatter(x_positions, y_positions,
+                        c=preferred_sfs,
+                        cmap=plt.cm.Spectral,
+                        s=100,
+                        edgecolors='black',
+                        linewidths=1)
+
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label(label, fontsize=12)
+
+    ax.set_xlabel('RF Center X Position (degrees)', fontsize=14)
+    ax.set_ylabel('RF Center Y Position (degrees)', fontsize=14)
+    ax.set_title(f'RF Centers Colored by {label}', fontsize=16, fontweight='bold')
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal')
 
@@ -1005,114 +1210,81 @@ def plot_preferred_tf_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
     plt.close()
 
 
-def plot_preferred_sf_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
-                                     probe_name=None, mouse_name=None, background=True, nested=False, binned=False):
+def plot_rf_fwhm_heatmap(combined_df, output_dir=None, probe_name=None, mouse_name=None, bin_size=5):
     """
-    Plot RF centers colored by preferred spatial frequency with average RF background.
-    Uses CSV data with RF centers already computed.
-    
+    Plot a heatmap of mean RF FWHM (degrees) binned into spatial bins.
+
     Parameters:
     -----------
     combined_df : DataFrame
-        Results dataframe with RF center positions
-    filtered_rfs : list or array
-        List of receptive field arrays (2D) for each unit
-    output_dir : str or Path, optional
-        Path to save figure
+        Results dataframe with rf_x_center, rf_y_center, rf_fwhm_deg columns
+    output_dir : Path, optional
+        Output directory
     probe_name : str, optional
         Probe name for title
     mouse_name : str, optional
         Mouse name for title
-    background : bool
-        Whether to show average RF as background
-    nested : bool
-        Whether to use nested SF values
-    binned : bool
-        Whether to bin units into 5x5 degree squares and show mode SF
+    bin_size : int
+        Size of spatial bins in degrees (default 5)
     """
-    df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
-    
+    df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center', 'rf_fwhm_deg'])
+
     if len(df) == 0:
-        print("No valid RF center data found")
+        print("No valid RF FWHM data found")
         return
-    
+
     x_positions = df['rf_x_center'].values
     y_positions = df['rf_y_center'].values
-
-    if nested:
-        preferred_sfs = df['pref_sf_nested'].values
-        title = f'RF Centers Colored by Nested {"Binned " if binned else ""}Preferred Spatial Frequency\n({len(df)} cells)'
-        suffix = 'sf_nested'
-    else:
-        preferred_sfs = df['pref_sf'].values
-        title = f'RF Centers Colored by {"Binned " if binned else ""}Preferred Spatial Frequency\n({len(df)} cells)'
-        suffix = 'sf'
-
-    filename = f'rf_centers_by_preferred_{suffix}'
-    if binned:
-        filename += '_binned'
-    save_path = output_dir / f'{filename}.png' if output_dir else None
-
-    unique_sfs = np.unique(preferred_sfs)
-    colors = ListedColormap(plt.cm.tab10.colors[:len(unique_sfs)])
-    sf_to_idx = {sf: i for i, sf in enumerate(unique_sfs)}
+    fwhm_values = df['rf_fwhm_deg'].values
 
     x_min, x_max = -40, 40
     y_min, y_max = -40, 40
-    x_padding = 0
-    y_padding = 0
 
-    fig, ax = plt.subplots(figsize=(12, 10))
+    x_bins = np.arange(x_min, x_max + bin_size, bin_size)
+    y_bins = np.arange(y_min, y_max + bin_size, bin_size)
 
-    if filtered_rfs is not None and len(filtered_rfs) > 0:
-        average_rf = np.mean(filtered_rfs, axis=0)
-        if background:
-            ax.imshow(average_rf, origin="lower", cmap='viridis', alpha=0.4,
-                      extent=[x_min - x_padding, x_max + x_padding,
-                               y_min - y_padding, y_max + y_padding],
-                      aspect='auto')
+    heatmap = np.full((len(y_bins) - 1, len(x_bins) - 1), np.nan)
+    counts = np.zeros_like(heatmap)
 
-    ax.set_xlim(x_min - x_padding, x_max + x_padding)
-    ax.set_ylim(y_min - y_padding, y_max + y_padding)
+    for xi, x_start in enumerate(x_bins[:-1]):
+        for yi, y_start in enumerate(y_bins[:-1]):
+            in_bin = (
+                (x_positions >= x_start) & (x_positions < x_start + bin_size) &
+                (y_positions >= y_start) & (y_positions < y_start + bin_size)
+            )
+            if in_bin.sum() > 0:
+                heatmap[yi, xi] = np.mean(fwhm_values[in_bin])
+                counts[yi, xi] = in_bin.sum()
 
-    if binned:
-        bin_size = 5
-        x_bins = np.arange(x_min, x_max + bin_size, bin_size)
-        y_bins = np.arange(y_min, y_max + bin_size, bin_size)
+    fig, ax = plt.subplots(figsize=(10, 9))
 
-        bin_x_centers = []
-        bin_y_centers = []
-        bin_mode_sf = []
+    im = ax.imshow(
+        heatmap,
+        origin='lower',
+        extent=[x_min, x_max, y_min, y_max],
+        cmap='Spectral',
+        aspect='equal',
+        interpolation='nearest'
+    )
 
-        for x_start in x_bins[:-1]:
-            for y_start in y_bins[:-1]:
-                in_bin = (
-                    (x_positions >= x_start) & (x_positions < x_start + bin_size) &
-                    (y_positions >= y_start) & (y_positions < y_start + bin_size)
-                )
-                if in_bin.sum() > 0:
-                    bin_x_centers.append(x_start + bin_size / 2)
-                    bin_y_centers.append(y_start + bin_size / 2)
-                    mode_sf = pd.Series(preferred_sfs[in_bin]).mode()[0]
-                    bin_mode_sf.append(mode_sf)
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Mean RF FWHM (degrees)', fontsize=12)
 
-        # Plot binned points, one scatter call per unique SF for clean legend
-        for sf in unique_sfs:
-            mask = np.array(bin_mode_sf) == sf
-            if mask.sum() > 0:
-                ax.scatter(np.array(bin_x_centers)[mask], np.array(bin_y_centers)[mask],
-                           color=colors(sf_to_idx[sf]), label=f'{sf:.2f} cpd',
-                           s=200, alpha=0.9, edgecolors='black', linewidths=1.0)
-    else:
-        for sf in unique_sfs:
-            sf_mask = (preferred_sfs == sf)
-            ax.scatter(x_positions[sf_mask], y_positions[sf_mask],
-                       color=colors(sf_to_idx[sf]), label=f'{sf:.2f} cpd',
-                       s=100, alpha=0.8, edgecolors='black', linewidths=1.0)
+    x_centers = x_bins[:-1] + bin_size / 2
+    y_centers = y_bins[:-1] + bin_size / 2
+    for xi, xc in enumerate(x_centers):
+        for yi, yc in enumerate(y_centers):
+            n = int(counts[yi, xi])
+            if n > 0:
+                ax.text(xc, yc, str(n), ha='center', va='center',
+                        fontsize=10, color='black', alpha=0.8)
 
     ax.set_xlabel('RF Center X Position (degrees)', fontsize=14)
     ax.set_ylabel('RF Center Y Position (degrees)', fontsize=14)
+    ax.axvline(0, color='white', linewidth=0.8, linestyle='--', alpha=0.5)
+    ax.axhline(0, color='white', linewidth=0.8, linestyle='--', alpha=0.5)
 
+    title = f'RF Size (FWHM) by Visual Field Position\n({len(df)} cells, {bin_size}° bins)'
     if mouse_name and probe_name:
         title = f'{mouse_name} - {probe_name}\n' + title
     elif probe_name:
@@ -1120,14 +1292,118 @@ def plot_preferred_sf_by_rf_from_csv(combined_df, filtered_rfs, output_dir=None,
     elif mouse_name:
         title = f'{mouse_name}\n' + title
 
-    ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-    ax.legend(title='Preferred SF', bbox_to_anchor=(1.05, 1),
-              loc='upper left', fontsize=10, title_fontsize=11)
-    ax.grid(True, alpha=0.3)
-    ax.set_aspect('equal')
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
 
     plt.tight_layout()
 
+    save_path = output_dir / 'rf_fwhm_heatmap.png' if output_dir else None
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    plt.close()
+
+
+def plot_rf_scatter_heatmap(combined_df, output_dir=None, probe_name=None, mouse_name=None,
+                            bin_size=5, n_neighbors=5):
+    """
+    Estimate RF scatter as the mean distance to the N nearest neighbors in visual space,
+    then plot as a heatmap binned into spatial bins.
+
+    Note: this computes nearest neighbors in visual space (not cortical space), so it reflects
+    how densely RF centers are clustered at each visual field location rather than the
+    paper's cortical-space scatter measure.
+
+    Parameters:
+    -----------
+    combined_df : DataFrame
+        Results dataframe with rf_x_center, rf_y_center columns
+    output_dir : Path, optional
+        Output directory
+    probe_name : str, optional
+        Probe name for title
+    mouse_name : str, optional
+        Mouse name for title
+    bin_size : int
+        Size of spatial bins in degrees (default 5)
+    n_neighbors : int
+        Number of nearest neighbors to average distance over (default 5)
+    """
+    df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center']).copy()
+
+    if len(df) < n_neighbors + 1:
+        print(f"Not enough units ({len(df)}) to compute {n_neighbors} nearest neighbors")
+        return
+
+    x_positions = df['rf_x_center'].values
+    y_positions = df['rf_y_center'].values
+
+    coords = np.column_stack([x_positions, y_positions])
+    tree = cKDTree(coords)
+
+    # k+1 because first result is always the point itself (distance=0)
+    distances, _ = tree.query(coords, k=n_neighbors + 1)
+    mean_nn_distances = distances[:, 1:].mean(axis=1)
+
+    x_min, x_max = -40, 40
+    y_min, y_max = -40, 40
+
+    x_bins = np.arange(x_min, x_max + bin_size, bin_size)
+    y_bins = np.arange(y_min, y_max + bin_size, bin_size)
+
+    heatmap = np.full((len(y_bins) - 1, len(x_bins) - 1), np.nan)
+    counts = np.zeros_like(heatmap)
+
+    for xi, x_start in enumerate(x_bins[:-1]):
+        for yi, y_start in enumerate(y_bins[:-1]):
+            in_bin = (
+                (x_positions >= x_start) & (x_positions < x_start + bin_size) &
+                (y_positions >= y_start) & (y_positions < y_start + bin_size)
+            )
+            if in_bin.sum() > 0:
+                heatmap[yi, xi] = mean_nn_distances[in_bin].mean()
+                counts[yi, xi] = in_bin.sum()
+
+    fig, ax = plt.subplots(figsize=(10, 9))
+
+    im = ax.imshow(
+        heatmap,
+        origin='lower',
+        extent=[x_min, x_max, y_min, y_max],
+        cmap='Spectral',
+        aspect='equal',
+        interpolation='nearest'
+    )
+
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(f'Mean distance to {n_neighbors} nearest neighbors (degrees)', fontsize=12)
+
+    x_centers = x_bins[:-1] + bin_size / 2
+    y_centers = y_bins[:-1] + bin_size / 2
+    for xi, xc in enumerate(x_centers):
+        for yi, yc in enumerate(y_centers):
+            n = int(counts[yi, xi])
+            if n > 0:
+                ax.text(xc, yc, str(n), ha='center', va='center',
+                        fontsize=10, color='black', alpha=0.8)
+
+    ax.set_xlabel('RF Center X Position (degrees)', fontsize=14)
+    ax.set_ylabel('RF Center Y Position (degrees)', fontsize=14)
+    ax.axvline(0, color='white', linewidth=0.8, linestyle='--', alpha=0.5)
+    ax.axhline(0, color='white', linewidth=0.8, linestyle='--', alpha=0.5)
+
+    title = f'RF Scatter ({n_neighbors}-NN mean distance) by Visual Field Position\n({len(df)} cells, {bin_size}° bins)'
+    if mouse_name and probe_name:
+        title = f'{mouse_name} - {probe_name}\n' + title
+    elif probe_name:
+        title = f'{probe_name}\n' + title
+    elif mouse_name:
+        title = f'{mouse_name}\n' + title
+
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+
+    plt.tight_layout()
+
+    save_path = output_dir / 'rf_scatter_heatmap.png' if output_dir else None
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
 
@@ -1138,9 +1414,7 @@ def plot_rf_position_vs_pref_ori_from_csv(combined_df, save_path_x=None, save_pa
                                           probe_name=None, mouse_name=None):
     """
     Create scatter plots: RF position (X and Y) vs preferred orientation.
-    Uses CSV data with RF centers already computed.
     """
-    # Filter out rows without RF center data
     df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
     
     if len(df) == 0:
@@ -1153,11 +1427,8 @@ def plot_rf_position_vs_pref_ori_from_csv(combined_df, save_path_x=None, save_pa
     
     unique_oris = np.unique(preferred_oris)
     n_orientations = len(unique_oris)
-    
-    if n_orientations <= 10:
-        ori_colors = plt.cm.tab10(np.linspace(0, 1, n_orientations))
-    else:
-        ori_colors = plt.cm.tab20(np.linspace(0, 1, n_orientations))
+    cmap = plt.cm.get_cmap('Spectral', n_orientations)
+    ori_colors = [cmap(i) for i in range(n_orientations)]
     
     base_title_suffix = f'\n({len(df)} cells)'
     if mouse_name and probe_name:
@@ -1169,64 +1440,40 @@ def plot_rf_position_vs_pref_ori_from_csv(combined_df, save_path_x=None, save_pa
     else:
         base_title = ''
     
-    # Plot 1: X position vs Preferred Orientation
     fig1, ax1 = plt.subplots(figsize=(10, 8))
-    
     for i, ori in enumerate(unique_oris):
         ori_mask = (preferred_oris == ori)
-        ax1.scatter(x_positions[ori_mask], preferred_oris[ori_mask], 
-                   color=ori_colors[i], label=f'{int(ori)}°', s=100, alpha=0.7)
-    
+        ax1.scatter(x_positions[ori_mask], preferred_oris[ori_mask],
+                    color=ori_colors[i], label=f'{int(ori)}°', s=100, alpha=0.7)
     ax1.set_xlabel('RF Center X Position (degrees)', fontsize=14)
     ax1.set_ylabel('Preferred Orientation (degrees)', fontsize=14)
-    
     title1 = 'RF X Position vs Preferred Orientation'
-    if base_title:
-        title1 = base_title + '\n' + title1 + base_title_suffix
-    else:
-        title1 = title1 + base_title_suffix
-    
+    title1 = (base_title + '\n' + title1 + base_title_suffix) if base_title else (title1 + base_title_suffix)
     ax1.set_title(title1, fontsize=16, fontweight='bold', pad=20)
-    ax1.legend(title='Preferred Orientation', bbox_to_anchor=(1.05, 1), 
-              loc='upper left', fontsize=10, title_fontsize=11)
+    ax1.legend(title='Preferred Orientation', bbox_to_anchor=(1.05, 1),
+               loc='upper left', fontsize=10, title_fontsize=11)
     ax1.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    
     if save_path_x:
         plt.savefig(save_path_x, dpi=300, bbox_inches='tight')
-        #print(f"✓ Saved X position figure to: {save_path_x}")
-    
     plt.close()
     
-    # Plot 2: Y position vs Preferred Orientation
     fig2, ax2 = plt.subplots(figsize=(10, 8))
-    
     for i, ori in enumerate(unique_oris):
         ori_mask = (preferred_oris == ori)
-        ax2.scatter(y_positions[ori_mask], preferred_oris[ori_mask], 
-                   color=ori_colors[i], label=f'{int(ori)}°', s=100, alpha=0.7)
-    
+        ax2.scatter(y_positions[ori_mask], preferred_oris[ori_mask],
+                    color=ori_colors[i], label=f'{int(ori)}°', s=100, alpha=0.7)
     ax2.set_xlabel('RF Center Y Position (degrees)', fontsize=14)
     ax2.set_ylabel('Preferred Orientation (degrees)', fontsize=14)
-    
     title2 = 'RF Y Position vs Preferred Orientation'
-    if base_title:
-        title2 = base_title + '\n' + title2 + base_title_suffix
-    else:
-        title2 = title2 + base_title_suffix
-    
+    title2 = (base_title + '\n' + title2 + base_title_suffix) if base_title else (title2 + base_title_suffix)
     ax2.set_title(title2, fontsize=16, fontweight='bold', pad=20)
-    ax2.legend(title='Preferred Orientation', bbox_to_anchor=(1.05, 1), 
-              loc='upper left', fontsize=10, title_fontsize=11)
+    ax2.legend(title='Preferred Orientation', bbox_to_anchor=(1.05, 1),
+               loc='upper left', fontsize=10, title_fontsize=11)
     ax2.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    
     if save_path_y:
         plt.savefig(save_path_y, dpi=300, bbox_inches='tight')
-        #print(f"✓ Saved Y position figure to: {save_path_y}")
-    
     plt.close()
 
 
@@ -1234,9 +1481,7 @@ def plot_rf_position_vs_pref_tf_from_csv(combined_df, save_path_x=None, save_pat
                                          probe_name=None, mouse_name=None):
     """
     Create scatter plots: RF position (X and Y) vs preferred temporal frequency.
-    Uses CSV data with RF centers already computed.
     """
-    # Filter out rows without RF center data
     df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
     
     if len(df) == 0:
@@ -1249,11 +1494,8 @@ def plot_rf_position_vs_pref_tf_from_csv(combined_df, save_path_x=None, save_pat
     
     unique_tfs = np.unique(preferred_tfs)
     n_tfs = len(unique_tfs)
-    
-    if n_tfs <= 10:
-        tf_colors = plt.cm.tab10(np.linspace(0, 1, n_tfs))
-    else:
-        tf_colors = plt.cm.tab20(np.linspace(0, 1, n_tfs))
+    cmap = plt.cm.get_cmap('Spectral', n_tfs)
+    tf_colors = [cmap(i) for i in range(n_tfs)]
     
     base_title_suffix = f'\n({len(df)} cells)'
     if mouse_name and probe_name:
@@ -1265,64 +1507,40 @@ def plot_rf_position_vs_pref_tf_from_csv(combined_df, save_path_x=None, save_pat
     else:
         base_title = ''
     
-    # Plot 1: X position vs Preferred TF
     fig1, ax1 = plt.subplots(figsize=(10, 8))
-    
     for i, tf in enumerate(unique_tfs):
         tf_mask = (preferred_tfs == tf)
-        ax1.scatter(x_positions[tf_mask], preferred_tfs[tf_mask], 
-                   color=tf_colors[i], label=f'{tf:.1f} Hz', s=100, alpha=0.7)
-    
+        ax1.scatter(x_positions[tf_mask], preferred_tfs[tf_mask],
+                    color=tf_colors[i], label=f'{tf:.1f} Hz', s=100, alpha=0.7)
     ax1.set_xlabel('RF Center X Position (degrees)', fontsize=14)
     ax1.set_ylabel('Preferred Temporal Frequency (Hz)', fontsize=14)
-    
     title1 = 'RF X Position vs Preferred Temporal Frequency'
-    if base_title:
-        title1 = base_title + '\n' + title1 + base_title_suffix
-    else:
-        title1 = title1 + base_title_suffix
-    
+    title1 = (base_title + '\n' + title1 + base_title_suffix) if base_title else (title1 + base_title_suffix)
     ax1.set_title(title1, fontsize=16, fontweight='bold', pad=20)
-    ax1.legend(title='Preferred TF', bbox_to_anchor=(1.05, 1), 
-              loc='upper left', fontsize=10, title_fontsize=11)
+    ax1.legend(title='Preferred TF', bbox_to_anchor=(1.05, 1),
+               loc='upper left', fontsize=10, title_fontsize=11)
     ax1.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    
     if save_path_x:
         plt.savefig(save_path_x, dpi=300, bbox_inches='tight')
-        #print(f"✓ Saved X position figure to: {save_path_x}")
-    
     plt.close()
-    
-    # Plot 2: Y position vs Preferred TF
+
     fig2, ax2 = plt.subplots(figsize=(10, 8))
-    
     for i, tf in enumerate(unique_tfs):
         tf_mask = (preferred_tfs == tf)
-        ax2.scatter(y_positions[tf_mask], preferred_tfs[tf_mask], 
-                   color=tf_colors[i], label=f'{tf:.1f} Hz', s=100, alpha=0.7)
-    
+        ax2.scatter(y_positions[tf_mask], preferred_tfs[tf_mask],
+                    color=tf_colors[i], label=f'{tf:.1f} Hz', s=100, alpha=0.7)
     ax2.set_xlabel('RF Center Y Position (degrees)', fontsize=14)
     ax2.set_ylabel('Preferred Temporal Frequency (Hz)', fontsize=14)
-    
     title2 = 'RF Y Position vs Preferred Temporal Frequency'
-    if base_title:
-        title2 = base_title + '\n' + title2 + base_title_suffix
-    else:
-        title2 = title2 + base_title_suffix
-    
+    title2 = (base_title + '\n' + title2 + base_title_suffix) if base_title else (title2 + base_title_suffix)
     ax2.set_title(title2, fontsize=16, fontweight='bold', pad=20)
-    ax2.legend(title='Preferred TF', bbox_to_anchor=(1.05, 1), 
-              loc='upper left', fontsize=10, title_fontsize=11)
+    ax2.legend(title='Preferred TF', bbox_to_anchor=(1.05, 1),
+               loc='upper left', fontsize=10, title_fontsize=11)
     ax2.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    
     if save_path_y:
         plt.savefig(save_path_y, dpi=300, bbox_inches='tight')
-        #print(f"✓ Saved Y position figure to: {save_path_y}")
-    
     plt.close()
 
 
@@ -1330,9 +1548,7 @@ def plot_rf_position_vs_pref_sf_from_csv(combined_df, save_path_x=None, save_pat
                                          probe_name=None, mouse_name=None):
     """
     Create scatter plots: RF position (X and Y) vs preferred spatial frequency.
-    Uses CSV data with RF centers already computed.
     """
-    # Filter out rows without RF center data
     df = combined_df.dropna(subset=['rf_x_center', 'rf_y_center'])
     
     if len(df) == 0:
@@ -1345,11 +1561,8 @@ def plot_rf_position_vs_pref_sf_from_csv(combined_df, save_path_x=None, save_pat
     
     unique_sfs = np.unique(preferred_sfs)
     n_sfs = len(unique_sfs)
-    
-    if n_sfs <= 10:
-        sf_colors = plt.cm.tab10(np.linspace(0, 1, n_sfs))
-    else:
-        sf_colors = plt.cm.tab20(np.linspace(0, 1, n_sfs))
+    cmap = plt.cm.get_cmap('Spectral', n_sfs)
+    sf_colors = [cmap(i) for i in range(n_sfs)]
     
     base_title_suffix = f'\n({len(df)} cells)'
     if mouse_name and probe_name:
@@ -1361,62 +1574,38 @@ def plot_rf_position_vs_pref_sf_from_csv(combined_df, save_path_x=None, save_pat
     else:
         base_title = ''
     
-    # Plot 1: X position vs Preferred SF
     fig1, ax1 = plt.subplots(figsize=(10, 8))
-    
     for i, sf in enumerate(unique_sfs):
         sf_mask = (preferred_sfs == sf)
-        ax1.scatter(x_positions[sf_mask], preferred_sfs[sf_mask], 
-                   color=sf_colors[i], label=f'{sf:.2f} cpd', s=100, alpha=0.7)
-    
+        ax1.scatter(x_positions[sf_mask], preferred_sfs[sf_mask],
+                    color=sf_colors[i], label=f'{sf:.2f} cpd', s=100, alpha=0.7)
     ax1.set_xlabel('RF Center X Position (degrees)', fontsize=14)
     ax1.set_ylabel('Preferred Spatial Frequency (cpd)', fontsize=14)
-    
     title1 = 'RF X Position vs Preferred Spatial Frequency'
-    if base_title:
-        title1 = base_title + '\n' + title1 + base_title_suffix
-    else:
-        title1 = title1 + base_title_suffix
-    
+    title1 = (base_title + '\n' + title1 + base_title_suffix) if base_title else (title1 + base_title_suffix)
     ax1.set_title(title1, fontsize=16, fontweight='bold', pad=20)
-    ax1.legend(title='Preferred SF', bbox_to_anchor=(1.05, 1), 
-              loc='upper left', fontsize=10, title_fontsize=11)
+    ax1.legend(title='Preferred SF', bbox_to_anchor=(1.05, 1),
+               loc='upper left', fontsize=10, title_fontsize=11)
     ax1.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    
     if save_path_x:
         plt.savefig(save_path_x, dpi=300, bbox_inches='tight')
-        #print(f"✓ Saved X position figure to: {save_path_x}")
-    
     plt.close()
-    
-    # Plot 2: Y position vs Preferred SF
+
     fig2, ax2 = plt.subplots(figsize=(10, 8))
-    
     for i, sf in enumerate(unique_sfs):
         sf_mask = (preferred_sfs == sf)
-        ax2.scatter(y_positions[sf_mask], preferred_sfs[sf_mask], 
-                   color=sf_colors[i], label=f'{sf:.2f} cpd', s=100, alpha=0.7)
-    
+        ax2.scatter(y_positions[sf_mask], preferred_sfs[sf_mask],
+                    color=sf_colors[i], label=f'{sf:.2f} cpd', s=100, alpha=0.7)
     ax2.set_xlabel('RF Center Y Position (degrees)', fontsize=14)
     ax2.set_ylabel('Preferred Spatial Frequency (cpd)', fontsize=14)
-    
     title2 = 'RF Y Position vs Preferred Spatial Frequency'
-    if base_title:
-        title2 = base_title + '\n' + title2 + base_title_suffix
-    else:
-        title2 = title2 + base_title_suffix
-    
+    title2 = (base_title + '\n' + title2 + base_title_suffix) if base_title else (title2 + base_title_suffix)
     ax2.set_title(title2, fontsize=16, fontweight='bold', pad=20)
-    ax2.legend(title='Preferred SF', bbox_to_anchor=(1.05, 1), 
-              loc='upper left', fontsize=10, title_fontsize=11)
+    ax2.legend(title='Preferred SF', bbox_to_anchor=(1.05, 1),
+               loc='upper left', fontsize=10, title_fontsize=11)
     ax2.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    
     if save_path_y:
         plt.savefig(save_path_y, dpi=300, bbox_inches='tight')
-        #print(f"✓ Saved Y position figure to: {save_path_y}")
-    
     plt.close()
