@@ -1,3 +1,4 @@
 ignore/
 jupyternotebooks/ignore/
 jupyternotebooks/ophys/results/
+jupyternotebooks/ophys/ophys_build_rf_fixed.ipynb
