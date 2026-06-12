@@ -584,7 +584,7 @@ def main():
                 print()
                 
                 try:
-                    # Process units and calculate receptive fields
+                    # Process units and calculate receptive fieldscd 
                     if args.verbose:
                         print(f"    Processing units for probe: {probe}")
                     
